@@ -33,6 +33,7 @@ async function precoVigente(
 //   ?status=...          — status exato (aberto|recebido|vencido|parcial|cancelado)
 //   ?mes=YYYY-MM         — dataExame comecando com "YYYY-MM-"
 //   ?convenioId=...      — convenioId exato
+//   ?limit=N&offset=N    — paginacao (default: sem limite; max 200)
 // Inclui nome do convenio e do procedimento (select apenas do nome). Retorno
 // achatado com convenioNome e procedimentoNome. Ordenacao: dataExame DESC.
 // Requer apenas Bearer.
@@ -46,6 +47,8 @@ export async function GET(req: NextRequest) {
     const status = req.nextUrl.searchParams.get("status") || undefined;
     const mes = req.nextUrl.searchParams.get("mes") || undefined;
     const convenioId = req.nextUrl.searchParams.get("convenioId") || undefined;
+    const limitParam = req.nextUrl.searchParams.get("limit");
+    const offsetParam = req.nextUrl.searchParams.get("offset");
 
     const where: {
       clinicaId: string;
@@ -56,6 +59,37 @@ export async function GET(req: NextRequest) {
     if (status) where.status = status;
     if (mes) where.dataExame = { startsWith: mes };
     if (convenioId) where.convenioId = convenioId;
+
+    // Paginação opcional — se `limit` vier, retorna {rows, total, hasMore}
+    // Se não vier, mantém comportamento retrocompatível (array direto).
+    const limit = limitParam ? Math.min(Math.max(parseInt(limitParam) || 20, 1), 200) : null;
+    const offset = offsetParam ? Math.max(parseInt(offsetParam) || 0, 0) : 0;
+
+    if (limit !== null) {
+      const [rows, total] = await Promise.all([
+        db.contaReceber.findMany({
+          where,
+          include: {
+            convenio: { select: { nome: true } },
+            procedimento: { select: { nome: true } },
+          },
+          orderBy: { dataExame: "desc" },
+          take: limit,
+          skip: offset,
+        }),
+        db.contaReceber.count({ where }),
+      ]);
+      const result = rows.map(({ convenio, procedimento, ...cr }) => ({
+        ...cr,
+        convenioNome: convenio?.nome ?? null,
+        procedimentoNome: procedimento?.nome ?? null,
+      }));
+      return NextResponse.json({
+        rows: result,
+        total,
+        hasMore: offset + limit < total,
+      });
+    }
 
     const rows = await db.contaReceber.findMany({
       where,

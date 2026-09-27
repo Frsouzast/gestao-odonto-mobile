@@ -6,13 +6,18 @@ import { brl, pct, hoje, mesAtual, dataBR, nomeMes } from "@/lib/utils";
 import {
   Wallet, CalendarDays, Calculator, Settings2, TrendingUp, TrendingDown,
   Clock, AlertTriangle, ArrowRight, Activity, Users, Receipt, CheckCircle2,
-  Stethoscope, type LucideIcon,
+  Stethoscope, Info, type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Sparkline, BarSparkline } from "@/components/app/sparkline";
 import { DonutChart, DonutLegend, type DonutSlice } from "@/components/app/donut-chart";
+import {
+  Tooltip as UITooltip,
+  TooltipTrigger as UITooltipTrigger,
+  TooltipContent as UITooltipContent,
+} from "@/components/ui/tooltip";
 
 type AbaId = "inicio" | "custos" | "procedimentos" | "agenda" | "financeiro" | "usuarios";
 
@@ -157,6 +162,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
               loading={financeiroQ.isLoading}
               icon={TrendingUp}
               accent="positive"
+              descricao="Soma dos valores recebidos (parcial ou total) neste mês. Inclui contas marcadas como 'recebido' ou 'parcial'."
             />
             <KpiCard
               label="Despesas pagas"
@@ -164,6 +170,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
               loading={financeiroQ.isLoading}
               icon={TrendingDown}
               accent="negative"
+              descricao="Soma das contas a pagar marcadas como 'pago' cujo vencimento cai neste mês."
             />
             <KpiCard
               label="Resultado"
@@ -171,18 +178,21 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
               loading={financeiroQ.isLoading}
               icon={Activity}
               accent={Number(financeiroQ.data?.resultado) >= 0 ? "positive" : "negative"}
+              descricao="Receitas menos despesas pagas no mês. Não inclui contas em aberto (use 'A receber' e 'A pagar' para isso)."
             />
             <KpiCard
               label="A receber"
               value={financeiroQ.data?.aReceber}
               loading={financeiroQ.isLoading}
               icon={Receipt}
+              descricao="Soma das contas a receber em aberto (status 'aberto', 'vencido' ou 'parcial') em qualquer mês."
             />
             <KpiCard
               label="A pagar"
               value={financeiroQ.data?.aPagar}
               loading={financeiroQ.isLoading}
               icon={Clock}
+              descricao="Soma das contas a pagar em aberto (status 'aberto' ou 'vencido') em qualquer mês."
             />
             <KpiCard
               label="Inadimplência"
@@ -190,6 +200,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
               loading={financeiroQ.isLoading}
               icon={AlertTriangle}
               accent={Number(financeiroQ.data?.inadimplencia) > 0 ? "warning" : undefined}
+              descricao="Soma das contas a receber com status 'vencido' (data de vencimento ultrapassada sem pagamento)."
             />
           </div>
         </section>
@@ -491,6 +502,28 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
         </div>
       </section>
 
+      {/* Fluxo de caixa projetado (30/60/90 dias) */}
+      {podeEditar && (
+        <section>
+          <SectionHeader
+            icon={Wallet}
+            title="Fluxo de caixa projetado"
+            subtitle="contas em aberto por janela"
+            action={
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavegar("financeiro")}
+                className="text-[var(--accent-app-text)] hover:bg-[var(--accent-app-soft-bg)] text-xs"
+              >
+                Ver detalhes <ArrowRight size={14} className="ml-1" />
+              </Button>
+            }
+          />
+          <FluxoCaixaProjetadoCard />
+        </section>
+      )}
+
       {/* Atalhos rápidos */}
       <section>
         <SectionHeader icon={Activity} title="Atalhos rápidos" />
@@ -572,12 +605,14 @@ function KpiCard({
   loading,
   icon: Icon,
   accent,
+  descricao,
 }: {
   label: string;
   value: number | undefined;
   loading?: boolean;
   icon: LucideIcon;
   accent?: "positive" | "negative" | "warning";
+  descricao?: string;
 }) {
   const colorClass =
     accent === "positive"
@@ -588,6 +623,15 @@ function KpiCard({
       ? "text-[var(--warning-app)]"
       : "text-[var(--text-app)]";
 
+  const labelSpan = (
+    <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-faint)] font-medium flex items-center gap-1 cursor-help">
+      {label}
+      {descricao && (
+        <Info size={10} className="text-[var(--text-app-faint)] opacity-60 hover:opacity-100" />
+      )}
+    </span>
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -595,9 +639,22 @@ function KpiCard({
       className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-3 sm:p-4 hover:border-[var(--border-app-strong)] hover:shadow-sm transition-all"
     >
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-faint)] font-medium">
-          {label}
-        </span>
+        {descricao ? (
+          <UITooltip>
+            <UITooltipTrigger asChild>{labelSpan}</UITooltipTrigger>
+            <UITooltipContent
+              side="bottom"
+              className="bg-[var(--text-app)] text-[var(--bg-app)] text-xs max-w-[200px] border-none"
+            >
+              <div className="space-y-0.5">
+                <div className="font-semibold">{label}</div>
+                <div className="text-[11px] opacity-90">{descricao}</div>
+              </div>
+            </UITooltipContent>
+          </UITooltip>
+        ) : (
+          labelSpan
+        )}
         <Icon size={13} className="text-[var(--text-app-faint)]" />
       </div>
       {loading ? (
@@ -1195,5 +1252,158 @@ function HealthStat({
         </span>
       </div>
     </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FluxoCaixaProjetadoCard — projeção de saldo em 3 janelas (30/60/90 dias)
+// ---------------------------------------------------------------------------
+interface JanelaFluxo {
+  dias: number;
+  label: string;
+  recebimentosPrevistos: number;
+  pagamentosPrevistos: number;
+  saldoProjetado: number;
+  quantidadeReceber: number;
+  quantidadePagar: number;
+}
+
+interface FluxoCaixaResponse {
+  janelas: JanelaFluxo[];
+  saldoAtualContas: number;
+}
+
+function FluxoCaixaProjetadoCard() {
+  const q = useQuery<FluxoCaixaResponse>({
+    queryKey: ["financeiro", "fluxo-caixa-projetado"],
+    queryFn: () => apiFetch(`/api/financeiro/fluxo-caixa-projetado`),
+    retry: 0,
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-32 w-full bg-[var(--bg-app-alt-strong)] rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (q.isError) {
+    return (
+      <p className="text-sm text-[var(--danger-app)] text-center py-4">
+        {q.error instanceof Error ? q.error.message : "Erro ao carregar"}
+      </p>
+    );
+  }
+
+  const data = q.data;
+  if (!data || data.janelas.length === 0) {
+    return (
+      <p className="text-sm text-[var(--text-app-muted)] text-center py-4">
+        Sem dados de fluxo de caixa.
+      </p>
+    );
+  }
+
+  const saldoAtual = data.saldoAtualContas;
+
+  return (
+    <div className="space-y-3">
+      {/* Saldo atual + 3 janelas */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Saldo atual (destaque maior) */}
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`border rounded-xl p-4 col-span-2 sm:col-span-1 ${
+            saldoAtual >= 0
+              ? "bg-[var(--accent-app-soft-bg)] border-[var(--accent-app-soft-border)]"
+              : "bg-[var(--danger-app-bg)] border-[var(--danger-app-border)]"
+          }`}
+        >
+          <div className="flex items-center gap-1.5 mb-1">
+            <Wallet size={12} className="text-[var(--text-app-faint)]" />
+            <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-faint)] font-medium">
+              Saldo atual
+            </span>
+          </div>
+          <div className={`text-2xl font-mono tabular-nums font-semibold ${saldoAtual >= 0 ? "text-[var(--accent-app-text)]" : "text-[var(--danger-app)]"}`}>
+            {brl(saldoAtual)}
+          </div>
+          <div className="text-[10px] text-[var(--text-app-muted)] mt-0.5">
+            recebido − pago
+          </div>
+        </motion.div>
+
+        {/* 3 janelas projetadas */}
+        {data.janelas.map((janela, i) => {
+          const saldo = janela.saldoProjetado;
+          const corValor = saldo >= 0 ? "text-[var(--accent-app-text)]" : "text-[var(--danger-app)]";
+          return (
+            <motion.div
+              key={janela.dias}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-3 hover:border-[var(--border-app-strong)] hover:shadow-sm transition-all"
+            >
+              <div className="text-[10px] uppercase tracking-wide text-[var(--text-app-faint)] font-medium mb-1">
+                {janela.label}
+              </div>
+              <div className={`text-lg font-mono tabular-nums font-semibold ${corValor}`}>
+                {brl(saldo)}
+              </div>
+              <div className="text-[10px] text-[var(--text-app-muted)] mt-1 space-y-0.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--accent-app-text)]">↑ {brl(janela.recebimentosPrevistos)}</span>
+                  <span className="text-[var(--text-app-faint)]">{janela.quantidadeReceber}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--danger-app)]">↓ {brl(janela.pagamentosPrevistos)}</span>
+                  <span className="text-[var(--text-app-faint)]">{janela.quantidadePagar}</span>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {/* Barra visual de projeção cumulativa */}
+      <div className="bg-[var(--bg-app)] border border-[var(--border-app-subtle)] rounded-lg p-3">
+        <div className="text-[10px] uppercase tracking-wide text-[var(--text-app-faint)] font-medium mb-2">
+          Projeção cumulativa de saldo
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-mono tabular-nums text-[var(--text-app-secondary)] w-20 text-right">
+            {brl(saldoAtual)}
+          </span>
+          <div className="flex-1 h-2 bg-[var(--bg-app-alt-strong)] rounded-full overflow-hidden flex">
+            {data.janelas.map((j, i) => {
+              const cumulativo = saldoAtual + data.janelas.slice(0, i + 1).reduce((s, x) => s + x.saldoProjetado, 0);
+              const cor = cumulativo >= 0 ? "var(--accent-app)" : "var(--danger-app)";
+              return (
+                <div
+                  key={j.dias}
+                  title={`${j.label}: ${brl(cumulativo)}`}
+                  style={{ background: cor, opacity: 0.4 + 0.2 * (i + 1) }}
+                  className="flex-1 h-full border-r border-[var(--surface-app)] last:border-r-0"
+                />
+              );
+            })}
+          </div>
+          <span className="font-mono tabular-nums text-[var(--text-app-secondary)] w-20">
+            {brl(saldoAtual + data.janelas.reduce((s, x) => s + x.saldoProjetado, 0))}
+          </span>
+        </div>
+        <div className="flex justify-between mt-1.5 text-[9px] text-[var(--text-app-faint)]">
+          <span>hoje</span>
+          <span>30d</span>
+          <span>60d</span>
+          <span>90d</span>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -908,19 +908,48 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
     return onNovoItem(() => setNovoOpen(true));
   }, [podeEditar]);
 
-  const contasQ = useQuery<ContaReceber[]>({
+  const PAGE_SIZE = 20;
+  const [paginaReceber, setPaginaReceber] = useState(0);
+
+  interface ContasReceberPaginado {
+    rows: ContaReceber[];
+    total: number;
+    hasMore: boolean;
+  }
+
+  const contasQ = useQuery<ContasReceberPaginado>({
     queryKey: [
       "contas-receber",
-      { mes, status: statusFilter, convenioId: convenioFilter },
+      { mes, status: statusFilter, convenioId: convenioFilter, pagina: paginaReceber },
     ],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("mes", mes);
       if (statusFilter) params.set("status", statusFilter);
       if (convenioFilter) params.set("convenioId", convenioFilter);
-      return apiFetch<ContaReceber[]>(`/api/contas-receber?${params.toString()}`);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(paginaReceber * PAGE_SIZE));
+      return apiFetch<ContasReceberPaginado>(`/api/contas-receber?${params.toString()}`);
     },
   });
+
+  const contas = contasQ.data?.rows ?? [];
+  const contasTotal = contasQ.data?.total ?? 0;
+  const contasHasMore = contasQ.data?.hasMore ?? false;
+
+  // Wrappers que resetam a paginação quando filtros mudam
+  const trocarMes = (novo: string) => {
+    setMes(novo);
+    setPaginaReceber(0);
+  };
+  const trocarStatus = (novo: string) => {
+    setStatusFilter(novo);
+    setPaginaReceber(0);
+  };
+  const trocarConvenio = (novo: string) => {
+    setConvenioFilter(novo);
+    setPaginaReceber(0);
+  };
 
   const conveniosQ = useQuery<Convenio[]>({
     queryKey: ["convenios"],
@@ -993,7 +1022,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
       transition={{ duration: 0.2 }}
       className="space-y-4"
     >
-      <MonthPicker mes={mes} setMes={setMes} />
+      <MonthPicker mes={mes} setMes={trocarMes} />
 
       {/* Filters */}
       <Card className={cardCls}>
@@ -1004,7 +1033,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
             </Label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => trocarStatus(e.target.value)}
               className={`w-full h-9 rounded-md border px-2.5 text-sm ${selectCls}`}
             >
               <option value="">Todos</option>
@@ -1021,7 +1050,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
             </Label>
             <select
               value={convenioFilter}
-              onChange={(e) => setConvenioFilter(e.target.value)}
+              onChange={(e) => trocarConvenio(e.target.value)}
               className={`w-full h-9 rounded-md border px-2.5 text-sm ${selectCls}`}
             >
               <option value="">Todos</option>
@@ -1055,18 +1084,23 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
               Lançamentos do mês
             </h3>
             <span className="text-[11px] text-[var(--text-app-muted)]">
-              {(contasQ.data ?? []).length}{" "}
-              {(contasQ.data ?? []).length === 1 ? "item" : "itens"}
+              {contasTotal}{" "}
+              {contasTotal === 1 ? "item" : "itens"}
+              {contasTotal > contas.length && (
+                <span className="text-[var(--text-app-faint)] ml-1">
+                  · mostrando {contas.length}
+                </span>
+              )}
             </span>
           </div>
-          {(contasQ.data ?? []).length > 0 && (
+          {contas.length > 0 && (
             <div className="flex items-center gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() =>
                   exportarCSV(
-                    contasQ.data ?? [],
+                    contas,
                     `contas-receber-${mes}`,
                     [
                       { chave: "pacienteNome", label: "Paciente" },
@@ -1090,7 +1124,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
                 onClick={() =>
                   imprimirTabela(
                     "Contas a Receber",
-                    `${nomeMes(mes)} · ${contasQ.data?.length ?? 0} lançamento(s)`,
+                    `${nomeMes(mes)} · ${contasTotal} lançamento(s)`,
                     [
                       { label: "Paciente" },
                       { label: "Procedimento" },
@@ -1100,7 +1134,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
                       { label: "Pago", format: (r) => fmtBRL(r.valorPago as number | null) },
                       { label: "Status" },
                     ],
-                    (contasQ.data ?? []) as unknown as Record<string, unknown>[]
+                    contas as unknown as Record<string, unknown>[]
                   )
                 }
                 className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
@@ -1118,7 +1152,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
             message={contasQ.error?.message ?? "Falha ao carregar"}
             onRetry={() => contasQ.refetch()}
           />
-        ) : (contasQ.data ?? []).length === 0 ? (
+        ) : contas.length === 0 ? (
           <EmptyState
             icon={<ArrowDownCircle size={22} strokeWidth={1.5} />}
             title="Nenhum lançamento neste mês"
@@ -1155,7 +1189,7 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(contasQ.data ?? []).map((c) => (
+                {contas.map((c) => (
                   <TableRow
                     key={c.id}
                     className="border-t border-[var(--border-app-subtle)] hover:bg-[var(--bg-app)]/40"
@@ -1287,6 +1321,38 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
                 ))}
               </TableBody>
             </Table>
+          </div>
+        )}
+
+        {/* Paginação */}
+        {contasTotal > PAGE_SIZE && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-[var(--border-app-subtle)] text-xs">
+            <span className="text-[var(--text-app-muted)]">
+              Página {paginaReceber + 1} de {Math.ceil(contasTotal / PAGE_SIZE)} ·{" "}
+              {contasTotal} {contasTotal === 1 ? "item" : "itens"} no total
+            </span>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPaginaReceber((p) => Math.max(0, p - 1))}
+                disabled={paginaReceber === 0}
+                className="h-7 text-[11px] bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+              >
+                <ChevronLeft size={12} /> Anterior
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPaginaReceber((p) => p + 1)}
+                disabled={!contasHasMore}
+                className="h-7 text-[11px] bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+              >
+                Próxima <ChevronRight size={12} />
+              </Button>
+            </div>
           </div>
         )}
       </Card>

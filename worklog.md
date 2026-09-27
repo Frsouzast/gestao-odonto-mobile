@@ -1185,3 +1185,137 @@ Task: 1 bugfix + 4 novas features (atalho 'n' em 3 abas, tooltips em status badg
 6. **Tooltips em KPI cards** explicando o que cada métrica significa (ex: "Resultado = receitas - despesas pagas")
 7. **Testes** automatizados com Playwright
 8. **Performance**: lazy load do donut-chart, sparkline, timeline (atualmente carregam junto no Início)
+
+---
+Task ID: T9 (cron rodada 5 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: 4 novas features (fluxo caixa projetado, tooltips em KPIs, impressão agenda, paginação) + 1 bugfix
+
+## Avaliação do status atual (início da rodada)
+- T8 (rodada anterior) deixou projeto em v2.2 estável com 17 features
+- QA inicial via agent-browser: login OK, sem bugs de runtime identificados
+- Prioridades sugeridas: paginação, impressão agenda, fluxo caixa, tooltips em KPIs
+- Esta rodada implementei 4 novas features + 1 bugfix encontrado durante QA
+
+## Work Log
+
+### Backend: 1 novo endpoint + 1 modificado
+- **`/api/financeiro/fluxo-caixa-projetado` (GET)** novo
+  - Retorna 3 janelas (30/60/90 dias) com recebimentos/pagamentos previstos baseados em contas em aberto
+  - Contas sem vencimento entram na primeira janela (30 dias) como "a receber a qualquer momento"
+  - `saldoAtualContas` = soma de contas recebidas - soma de contas pagas (snapshot do resultado realizado)
+- **`/api/contas-receber` (GET)** modificado para aceitar `?limit=N&offset=N`
+  - Se `limit` vier, retorna `{rows, total, hasMore}` (formato paginado)
+  - Se não vier, mantém comportamento retrocompatível (array direto)
+  - Max 200 por página (proteção)
+
+### FUNCIONALIDADE 1: Fluxo de Caixa Projetado (30/60/90 dias) no Início
+- Criado `FluxoCaixaProjetadoCard` em `inicio-tab.tsx`
+- **4 cards** em grid responsivo:
+  - **Saldo atual** (destaque maior, col-span-2 no mobile): bg accent-soft-bg se ≥0, danger-bg se <0
+  - **30 dias**, **60 dias**, **90 dias**: cada um com saldo projetado + breakdown (↑ recebimentos / ↓ pagamentos com contagem)
+- **Barra de projeção cumulativa**: mostra como o saldo evolui do "hoje" até 90 dias
+  - Cada segmento da barra colorido conforme saldo cumulativo naquela janela (accent se ≥0, danger se <0)
+  - Tooltip nativo mostrando "30 dias: R$ X" em cada segmento
+  - Labels hoje/30d/60d/90d abaixo
+- Loading: 3 skeletons h-32
+- QA: vi "Saldo atual R$ 60,00" + 3 janelas zeradas + projeção cumulativa R$ 60,00 → R$ 60,00 ✓
+
+### FUNCIONALIDADE 2: Tooltips explicativos nos 6 KPI cards do Início
+- Estendido `KpiCard` em `inicio-tab.tsx` com prop `descricao?: string`
+- Se `descricao` presente: envolve o label com `<UITooltip>` (shadcn) + ícone `Info` (10px) ao lado
+- Tooltip: `bg text-app / text bg-app` (cores invertidas) + label bold + descrição 11px
+- 6 descrições escritas para os KPIs do Financeiro do mês:
+  - **Receitas**: "Soma dos valores recebidos (parcial ou total) neste mês. Inclui contas marcadas como 'recebido' ou 'parcial'."
+  - **Despesas pagas**: "Soma das contas a pagar marcadas como 'pago' cujo vencimento cai neste mês."
+  - **Resultado**: "Receitas menos despesas pagas no mês. Não inclui contas em aberto (use 'A receber' e 'A pagar' para isso)."
+  - **A receber**: "Soma das contas a receber em aberto (status 'aberto', 'vencido' ou 'parcial') em qualquer mês."
+  - **A pagar**: "Soma das contas a pagar em aberto (status 'aberto' ou 'vencido') em qualquer mês."
+  - **Inadimplência**: "Soma das contas a receber com status 'vencido' (data de vencimento ultrapassada sem pagamento)."
+- `cursor-help` no span indica interatividade
+
+### FUNCIONALIDADE 3: Modo de impressão dedicado pra agenda do dia
+- Adicionado botão "Imprimir" (ícone Printer) no card de navegação da Agenda
+- Criado função `imprimirAgendaDia(data, agendamentos)` em `agenda-tab.tsx`
+- Layout PDF otimizado pra balcão de recepção:
+  - **Cabeçalho**: "Agenda do dia" + data longa (esquerda) + nome da clínica + timestamp (direita), borda inferior accent 2px
+  - **Tabela** com 7 colunas: #, Hora, Paciente, Exame, Tipo (Plano/Particular), Telefone, Status
+    - Hora em accent bold, paciente bold, telefone tabular-nums
+    - Status como pill colorido (5 cores mapeadas: aguardando cinza, atendido accent, faltou danger, desmarcou faint, remarcado warning)
+    - Zebra rows (nth-child even bg #fafaf9)
+  - **Footer**: total de agendamentos + breakdown por status + "Gestão Odonto-Radiológica"
+  - `@page { margin: 1.5cm; size: A4 }` pra impressão
+  - `window.print()` auto-dispara após 300ms
+- Botão disabled quando não há agendamentos no dia
+- QA: cliquei "Imprimir" → popup abriu com layout formatado, toast "Abrindo janela de impressão da agenda…" ✓
+
+### FUNCIONALIDADE 4: Paginação nas tabelas longas (Contas a Receber)
+- Backend: `?limit=N&offset=N` retorna `{rows, total, hasMore}`
+- Frontend (`ContasReceberPanel`):
+  - `PAGE_SIZE = 20`, state `paginaReceber`
+  - Wrappers `trocarMes`, `trocarStatus`, `trocarConvenio` resetam página pra 0 quando filtros mudam (sem useEffect — evita lint error `set-state-in-effect`)
+  - Header mostra: "Página X de Y · N itens no total" + "mostrando N" se houver paginação
+  - Botões "Anterior" / "Próxima" com ChevronLeft/ChevronRight
+  - Anterior disabled se `paginaReceber === 0`
+  - Próxima disabled se `!contasHasMore`
+  - Footer da tabela com border-top + bg surface-app
+- QA: com 1 item só, paginação não aparece (correto); com >20 itens, apareceria ✓
+
+### BUGFIX: contasQ.data.map quebrado após mudança para paginação
+- **Problema**: após mudar `contasQ.data` de array para objeto `{rows, total, hasMore}`, uma referência `(contasQ.data ?? []).map((c) => ...)` ficou esquecida na linha 1192 → "TypeError: (contasQ.data ?? []).map is not a function"
+- **Solução**: substituído por `contas.map((c) => ...)` (variável derivada `contas = contasQ.data?.rows ?? []`)
+- QA: achei o erro via agent-browser (Application error: client-side exception), corrigi, recarreguei — tabela carregou "Maria Teste" corretamente
+
+### STYLING (mandatório)
+- **FluxoCaixaProjetadoCard**:
+  - Saldo atual: card destacado (col-span-2 mobile, col-span-1 desktop) com bg accent-soft-bg (≥0) ou danger-bg (<0)
+  - 3 janelas: cards menores com hover state + breakdown ↑/↓ colorido (accent/danger)
+  - Barra cumulativa: 3 segmentos com opacity crescente (0.4 → 0.6 → 0.8) + tooltip nativo por segmento
+- **KpiCard tooltips**: ícone Info (10px) ao lado do label, opacity 0.6 → 1.0 no hover
+- **Paginação**: footer discreto com border-top subtle, botões h-7 com hover bg-alt-strong
+- **Impressão agenda**: layout A4 profissional com cabeçalho accent, zebra rows, status pills coloridos
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **21 features totais** (acumuladas de T5+T6+T7+T8+T9):
+  - 6 abas (Início, Custos, Procedimentos, Agenda, Financeiro, Usuários)
+  - Atalhos Ctrl+1..6 + Ctrl+K (busca) + n (novo item em 4 contextos)
+  - Busca global command palette
+  - Configurações da clínica (nome + CNPJ)
+  - **Dashboard Início completo**: KPIs financeiros + Agenda hoje + Custo fixo + Procedimentos + **Saúde dos procedimentos** + Sparklines 6 meses + Donut status (30 dias) + Timeline 8 semanas + **Fluxo de caixa projetado 30/60/90 dias**
+  - **Tooltips em 6 KPI cards + 14 status badges** (20 descrições totais)
+  - Agenda com toggle Dia/Semana/Mês + agrupamento + **Impressão PDF dedicada**
+  - Workflow de glosas com prazos + banner + badges de dias
+  - **Paginação** em Contas a Receber (extensível p/ outras tabelas)
+  - Exportação CSV + Imprimir em 3 painéis do Financeiro
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados
+
+### Modificações concluídas
+- **1 novo endpoint**: `/api/financeiro/fluxo-caixa-projetado`
+- **1 endpoint modificado**: `/api/contas-receber` agora aceita `?limit=&offset=` (paginado)
+- **1 bugfix**: contasQ.data.map esquecido após mudança pra paginação
+- **Arquivos modificados**:
+  - `inicio-tab.tsx` (FluxoCaixaProjetadoCard + KpiCard tooltips + Info import)
+  - `agenda-tab.tsx` (botão Imprimir + função imprimirAgendaDia + Printer/useAuth imports)
+  - `financeiro-tab.tsx` (paginação ContasReceber + wrappers trocarMes/trocarStatus/trocarConvenio)
+- 3 screenshots em `/home/z/my-project/download/`:
+  - `inicio-v2.4.png` (Início com fluxo de caixa)
+
+### Issues/risks não resolvidos
+- Paginação só aplicada a Contas a Receber (Contas a Pagar, Glosas, Agendamentos ainda usam fetch-all)
+- Sem testes automatizados (Playwright/Vitest)
+- `/api/busca` ainda traz tudo da clínica (suficiente p/ SQLite single-tenant)
+- Tooltips em status badges só funcionam em hover (sem fallback mobile)
+
+### Prioridades recomendadas para próxima rodada (cron 15 min)
+1. **Estender paginação** para Contas a Pagar e Glosas (mesma pattern)
+2. **Workflow de glosas com prazos configuráveis** (permitir definir prazo por convênio)
+3. **Filtro avançado no health-check**: botão "ver apenas abaixo do equilíbrio"
+4. **Tooltips em KPI cards** do Financeiro (Dashboard) — hoje só no Início
+5. **Indicadores de fluxo de caixa**: botão "ver detalhes" que abre modal com gráfico de barras por dia
+6. **Performance**: lazy load do donut-chart, sparkline, timeline
+7. **Testes** automatizados com Playwright
+8. **Modo de impressão** pra Contas a Pagar e DRE (já existe CSV/Imprimir genérico, mas layout dedicado seria melhor)

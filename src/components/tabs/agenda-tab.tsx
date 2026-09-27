@@ -16,10 +16,11 @@ import {
   AlertTriangle,
   RefreshCw,
   Inbox,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { apiFetch } from "@/lib/auth-store";
+import { apiFetch, useAuth } from "@/lib/auth-store";
 import { cn, dataBR } from "@/lib/utils";
 import { onNovoItem } from "@/lib/atalhos";
 import { Card } from "@/components/ui/card";
@@ -559,6 +560,18 @@ export function AgendaTab() {
                 }}
                 className={cn(inputCls, "h-9 w-[150px]")}
               />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => imprimirAgendaDia(dataSelecionada, agendamentos)}
+                disabled={agendamentos.length === 0}
+                title="Imprimir agenda do dia (PDF)"
+                className="h-9 bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)] hover:text-[var(--text-app)]"
+              >
+                <Printer size={14} />
+                <span className="hidden sm:inline ml-1.5">Imprimir</span>
+              </Button>
             </div>
           </div>
         </Card>
@@ -1162,4 +1175,204 @@ function AgrupadoPorData({
       })}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// imprimirAgendaDia — abre uma janela de impressão com layout otimizado pra
+// balcão de recepção: cabeçalho com data + clínica, lista numerada com
+// horário/paciente/exame/convênio/status, e rodapé com totalizadores.
+// ---------------------------------------------------------------------------
+function imprimirAgendaDia(data: string, agendamentos: Agendamento[]) {
+  if (agendamentos.length === 0) {
+    toast.error("Nenhum agendamento para imprimir neste dia.");
+    return;
+  }
+
+  const dataHora = new Date().toLocaleString("pt-BR");
+  const dataLonga = formatarDataLonga(data);
+  const usuario = useAuth.getState().usuario;
+  const nomeClinica = usuario?.clinica.nome ?? "Clínica";
+
+  // Estatísticas por status
+  const porStatus: Record<string, number> = {};
+  for (const a of agendamentos) {
+    porStatus[a.status] = (porStatus[a.status] ?? 0) + 1;
+  }
+  const statsText = Object.entries(porStatus)
+    .map(([s, n]) => `${STATUS_AGENDAMENTO[s as StatusAgendamento]?.label ?? s}: ${n}`)
+    .join(" · ");
+
+  const rows = agendamentos
+    .map(
+      (a, i) => `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td class="hora">${a.hora || "—"}</td>
+        <td class="paciente">${escapeHtml(a.nome)}</td>
+        <td class="exame">${escapeHtml(a.exame || "—")}</td>
+        <td class="tipo">${a.plano ? "Plano" : a.particular ? "Particular" : "—"}</td>
+        <td class="telefone">${escapeHtml(a.telefone || "—")}</td>
+        <td class="status status-${a.status}">${STATUS_AGENDAMENTO[a.status]?.label ?? a.status}</td>
+      </tr>`,
+    )
+    .join("");
+
+  const html = `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Agenda — ${dataLonga}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #1c1917;
+    margin: 24px;
+    font-size: 12px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #0f766e;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+  }
+  .header h1 {
+    color: #0f766e;
+    font-size: 18px;
+    margin: 0 0 4px;
+  }
+  .header .sub { color: #78716c; font-size: 11px; }
+  .header .clinica {
+    text-align: right;
+    font-size: 11px;
+    color: #78716c;
+  }
+  .header .clinica strong {
+    color: #1c1917;
+    font-size: 12px;
+    display: block;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  th {
+    background: #0f766e;
+    color: white;
+    text-align: left;
+    padding: 8px 6px;
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td {
+    padding: 8px 6px;
+    border-bottom: 1px solid #e7e5e4;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #fafaf9; }
+  .num { text-align: center; width: 28px; color: #a8a29e; font-variant-numeric: tabular-nums; }
+  .hora { text-align: center; width: 60px; font-weight: 600; color: #0f766e; font-variant-numeric: tabular-nums; }
+  .paciente { font-weight: 500; min-width: 140px; }
+  .exame { color: #44403c; }
+  .tipo { width: 80px; text-align: center; }
+  .telefone { width: 100px; color: #78716c; font-variant-numeric: tabular-nums; }
+  .status {
+    width: 90px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 10px;
+    color: white;
+  }
+  .status-aguardando { background: #78716c; }
+  .status-atendido { background: #0f766e; }
+  .status-faltou { background: #dc2626; }
+  .status-desmarcou { background: #a8a29e; }
+  .status-remarcado { background: #b45309; }
+  .footer {
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 1px solid #e7e5e4;
+    display: flex;
+    justify-content: space-between;
+    color: #a8a29e;
+    font-size: 10px;
+  }
+  .stats {
+    color: #44403c;
+    font-size: 11px;
+  }
+  .stats strong { color: #0f766e; }
+  @page { margin: 1.5cm; size: A4; }
+  @media print {
+    body { margin: 0; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Agenda do dia</h1>
+      <div class="sub">${dataLonga}</div>
+    </div>
+    <div class="clinica">
+      <strong>${escapeHtml(nomeClinica)}</strong>
+      Gerado em ${dataHora}
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Hora</th>
+        <th>Paciente</th>
+        <th>Exame</th>
+        <th>Tipo</th>
+        <th>Telefone</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <div class="stats">
+      <strong>${agendamentos.length}</strong> agendamento(s) · ${statsText}
+    </div>
+    <div>Gestão Odonto-Radiológica</div>
+  </div>
+
+  <script>
+    window.onload = function() { setTimeout(function() { window.print(); }, 300); };
+  </script>
+</body>
+</html>`;
+
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) {
+    toast.error("Popup bloqueado. Permita popups para imprimir.");
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  toast.success("Abrindo janela de impressão da agenda…");
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
