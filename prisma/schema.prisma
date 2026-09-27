@@ -2,7 +2,8 @@
 // Multi-tenant via clinica_id; 3 papéis: dono, financeiro, recepcao.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
