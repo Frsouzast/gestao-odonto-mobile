@@ -27,6 +27,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip as UITooltip,
+  TooltipTrigger as UITooltipTrigger,
+  TooltipContent as UITooltipContent,
+} from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ---------------------------------------------------------------------------
@@ -61,28 +66,33 @@ interface Agendamento {
 // ---------------------------------------------------------------------------
 const STATUS_AGENDAMENTO: Record<
   StatusAgendamento,
-  { label: string; badge: string }
+  { label: string; badge: string; descricao: string }
 > = {
   aguardando: {
     label: "Aguardando chegar",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-secondary)]",
+    descricao: "Paciente agendado, ainda não compareceu à clínica.",
   },
   atendido: {
     label: "Atendido",
     badge:
       "bg-[var(--accent-app-soft-bg-strong)] text-[var(--accent-app-text)]",
+    descricao: "Paciente compareceu e foi atendido.",
   },
   faltou: {
     label: "Faltou",
     badge: "bg-[var(--danger-app-bg-strong)] text-[var(--danger-app)]",
+    descricao: "Paciente não compareceu sem aviso prévio.",
   },
   desmarcou: {
     label: "Desmarcou",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)]",
+    descricao: "Paciente cancelou o agendamento sem remarcar.",
   },
   remarcado: {
     label: "Remarcado",
     badge: "bg-[var(--warning-app-bg-strong)] text-[var(--warning-app)]",
+    descricao: "Agendamento remarcado para outra data. Clique em \"ver remarcação\" para ir ao novo dia.",
   },
 };
 
@@ -186,18 +196,21 @@ function calcularPeriodo(
   };
 }
 
-// Helper para invalidar a query correta de agendamentos conforme o modo
+// Helper para invalidar a query correta de agendamentos conforme o modo.
+// Sempre invalida tanto a query da data específica quanto as queries de período,
+// porque o usuário pode trocar de modo e a UI precisa estar consistente.
 function invalidarAgenda(
   qc: ReturnType<typeof useQueryClient>,
-  modo: "dia" | "semana" | "mes",
+  _modo: "dia" | "semana" | "mes",
   dataSelecionada: string,
 ) {
-  if (modo === "dia") {
-    qc.invalidateQueries({ queryKey: ["agendamentos", dataSelecionada] });
-  } else {
-    // Invalida todas as queries de período — deixe o TanStack refazer
-    qc.invalidateQueries({ queryKey: ["agendamentos", "periodo"] });
-  }
+  // Invalida a query do dia específico (caso o usuário esteja no modo dia)
+  qc.invalidateQueries({ queryKey: ["agendamentos", dataSelecionada] });
+  // Invalida TODAS as queries de período — mesmo se o usuário está no modo dia,
+  // ele pode trocar pra semana/mês depois e o cache precisa estar fresco
+  qc.invalidateQueries({ queryKey: ["agendamentos", "periodo"] });
+  // Também invalida o resumo de status (pie chart no Início)
+  qc.invalidateQueries({ queryKey: ["agendamentos", "resumo-status"] });
 }
 
 // ---------------------------------------------------------------------------
@@ -967,14 +980,27 @@ function AppointmentRow({
         </Button>
 
         {/* Inline status indicator (subtle reminder of current status) */}
-        <span
-          className={cn(
-            "ml-auto text-[10px] px-1.5 py-0.5 rounded-full",
-            st.badge,
-          )}
-        >
-          {st.label}
-        </span>
+        <UITooltip>
+          <UITooltipTrigger asChild>
+            <span
+              className={cn(
+                "ml-auto text-[10px] px-1.5 py-0.5 rounded-full cursor-help",
+                st.badge,
+              )}
+            >
+              {st.label}
+            </span>
+          </UITooltipTrigger>
+          <UITooltipContent
+            side="left"
+            className="bg-[var(--text-app)] text-[var(--bg-app)] text-xs max-w-[220px] border-none"
+          >
+            <div className="space-y-0.5">
+              <div className="font-semibold">{st.label}</div>
+              <div className="text-[11px] opacity-90">{st.descricao}</div>
+            </div>
+          </UITooltipContent>
+        </UITooltip>
       </div>
 
       {/* Inline remarcar form */}

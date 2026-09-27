@@ -369,6 +369,28 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
         </section>
       </div>
 
+      {/* Saúde dos Procedimentos — resumo */}
+      {podeEditar && (
+        <section>
+          <SectionHeader
+            icon={Calculator}
+            title="Saúde dos procedimentos"
+            subtitle="preço vs ponto de equilíbrio"
+            action={
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavegar("procedimentos")}
+                className="text-[var(--accent-app-text)] hover:bg-[var(--accent-app-soft-bg)] text-xs"
+              >
+                Ver detalhes <ArrowRight size={14} className="ml-1" />
+              </Button>
+            }
+          />
+          <SaudeProcedimentosCard />
+        </section>
+      )}
+
       {/* Tendência 6 meses — Sparklines */}
       {podeEditar && (
         <section>
@@ -454,6 +476,18 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
         />
         <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4">
           <StatusAgendamentosCard />
+        </div>
+      </section>
+
+      {/* Linha do tempo: 8 semanas de agendamentos */}
+      <section>
+        <SectionHeader
+          icon={CalendarDays}
+          title="Volume de agendamentos — últimas 8 semanas"
+          subtitle="tendência semanal"
+        />
+        <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4">
+          <TimelineAgendamentosCard />
         </div>
       </section>
 
@@ -818,5 +852,348 @@ function StatusAgendamentosCard() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TimelineAgendamentosCard — barra horizontal das últimas 8 semanas com
+// distribuição por status (stacked bar). Sem recharts — SVG puro + grid CSS.
+// ---------------------------------------------------------------------------
+interface SemanaTimeline {
+  semanaInicio: string;
+  semanaFim: string;
+  label: string;
+  total: number;
+  porStatus: { status: string; total: number }[];
+}
+
+interface TimelineResponse {
+  semanas: SemanaTimeline[];
+  semanaAtualInicio: string;
+}
+
+const STATUS_COR: Record<string, string> = {
+  aguardando: "var(--text-app-muted)",
+  atendido: "var(--accent-app)",
+  faltou: "var(--danger-app)",
+  desmarcou: "var(--text-app-faint)",
+  remarcado: "var(--warning-app)",
+};
+
+const STATUS_COR_LABEL: Record<string, string> = {
+  aguardando: "Aguardando",
+  atendido: "Atendido",
+  faltou: "Faltou",
+  desmarcou: "Desmarcou",
+  remarcado: "Remarcado",
+};
+
+function TimelineAgendamentosCard() {
+  const q = useQuery<TimelineResponse>({
+    queryKey: ["agendamentos", "historico-8-semanas"],
+    queryFn: () => apiFetch(`/api/agendamentos/historico-8-semanas`),
+    retry: 0,
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-6 w-full bg-[var(--bg-app-alt-strong)] rounded" />
+        ))}
+      </div>
+    );
+  }
+
+  if (q.isError) {
+    return (
+      <p className="text-sm text-[var(--danger-app)] text-center py-4">
+        {q.error instanceof Error ? q.error.message : "Erro ao carregar"}
+      </p>
+    );
+  }
+
+  const semanas = q.data?.semanas ?? [];
+  if (semanas.length === 0) {
+    return (
+      <p className="text-sm text-[var(--text-app-muted)] text-center py-6">
+        Sem histórico.
+      </p>
+    );
+  }
+
+  const maxTotal = Math.max(...semanas.map((s) => s.total), 1);
+  const semanaAtual = q.data?.semanaAtualInicio;
+
+  return (
+    <div className="space-y-3">
+      {/* Grid das 8 barras */}
+      <div className="space-y-1.5">
+        {semanas.map((sem) => {
+          const isAtual = sem.semanaInicio === semanaAtual;
+          const percentuais = sem.porStatus.map((s) => ({
+            status: s.status,
+            label: STATUS_COR_LABEL[s.status] ?? s.status,
+            total: s.total,
+            cor: STATUS_COR[s.status] ?? "var(--text-app-faint)",
+            pctDoTotal: sem.total > 0 ? (s.total / sem.total) * 100 : 0,
+          }));
+          const larguraBarra = (sem.total / maxTotal) * 100;
+          return (
+            <div key={sem.semanaInicio} className="group flex items-center gap-3">
+              {/* Label da semana (esquerda) */}
+              <div className="w-24 sm:w-28 shrink-0 text-[11px] font-mono text-[var(--text-app-muted)] truncate text-right flex items-center justify-end gap-1.5">
+                {isAtual && (
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent-app)]" title="semana atual" />
+                )}
+                {sem.label}
+              </div>
+              {/* Barra (centro) — stacked */}
+              <div className="flex-1 min-w-0">
+                <div className="h-5 bg-[var(--bg-app-alt-strong)] rounded overflow-hidden flex">
+                  {sem.total === 0 ? (
+                    <div className="flex-1" />
+                  ) : (
+                    <div
+                      className="flex h-full rounded overflow-hidden transition-all duration-500"
+                      style={{ width: `${larguraBarra}%` }}
+                    >
+                      {percentuais
+                        .filter((p) => p.total > 0)
+                        .map((p, i) => (
+                          <div
+                            key={p.status}
+                            title={`${p.label}: ${p.total}`}
+                            style={{
+                              width: `${p.pctDoTotal}%`,
+                              background: p.cor,
+                            }}
+                            className={`h-full ${i === 0 ? "" : "border-l border-[var(--surface-app)]/30"}`}
+                          />
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Total (direita) */}
+              <div className="w-10 shrink-0 text-right text-xs font-mono tabular-nums text-[var(--text-app)] font-medium">
+                {sem.total}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legenda */}
+      <div className="flex flex-wrap gap-3 pt-3 border-t border-[var(--border-app-subtle)]">
+        {Object.entries(STATUS_COR_LABEL).map(([status, label]) => (
+          <div key={status} className="flex items-center gap-1.5 text-[11px] text-[var(--text-app-muted)]">
+            <span
+              className="w-2.5 h-2.5 rounded-sm"
+              style={{ background: STATUS_COR[status] }}
+            />
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {/* Tendência simples */}
+      {(() => {
+        const atual = semanas[semanas.length - 1]?.total ?? 0;
+        const anterior = semanas[semanas.length - 2]?.total ?? 0;
+        const delta = atual - anterior;
+        const isPositive = delta >= 0;
+        return (
+          <div className="text-[11px] text-[var(--text-app-muted)] flex items-center gap-1">
+            <span>Tendência vs semana anterior:</span>
+            <span
+              className={`font-mono font-medium ${isPositive ? "text-[var(--accent-app-text)]" : "text-[var(--danger-app)]"}`}
+            >
+              {isPositive ? "↑" : "↓"} {delta >= 0 ? "+" : ""}{delta}
+            </span>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SaudeProcedimentosCard — mostra quantos procedimentos estão abaixo do
+// ponto de equilíbrio, abaixo do sugerido, ou sem preço definido.
+// ---------------------------------------------------------------------------
+interface ProcedimentoHealth {
+  id: string;
+  nome: string;
+  precoFinal: number | null;
+  custoDireto: number;
+  precoSugerido: number;
+  pontoEquilibrio: number;
+  lucratividadeFinal: number;
+  abaixoEquilibrio: boolean;
+  abaixoSugerido: boolean;
+  semPreco: boolean;
+}
+
+interface HealthCheckResponse {
+  total: number;
+  abaixoEquilibrio: number;
+  abaixoSugerido: number;
+  semPreco: number;
+  procedimentos: ProcedimentoHealth[];
+}
+
+function SaudeProcedimentosCard() {
+  const q = useQuery<HealthCheckResponse>({
+    queryKey: ["procedimentos", "health-check"],
+    queryFn: () => apiFetch(`/api/procedimentos/health-check`),
+    retry: 0,
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 w-full bg-[var(--bg-app-alt-strong)] rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  // Capacidade produtiva não configurada (400) — trata como info vazio
+  if (q.isError) {
+    return (
+      <div className="bg-[var(--bg-app)] border border-[var(--border-app)] rounded-xl p-4 text-center">
+        <AlertTriangle className="mx-auto mb-2 text-[var(--warning-app)]" size={20} />
+        <p className="text-sm text-[var(--text-app-muted)] mb-2">
+          Configure a capacidade produtiva para ver a saúde dos procedimentos.
+        </p>
+      </div>
+    );
+  }
+
+  const data = q.data;
+  if (!data) return null;
+
+  if (data.total === 0) {
+    return (
+      <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4 text-center">
+        <Calculator className="mx-auto mb-2 text-[var(--text-app-faint)]" size={24} />
+        <p className="text-sm text-[var(--text-app-muted)]">
+          Nenhum procedimento cadastrado ainda.
+        </p>
+      </div>
+    );
+  }
+
+  const saudaveis = data.total - data.abaixoEquilibrio - data.abaixoSugerido - data.semPreco;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <HealthStat
+          label="Saudáveis"
+          value={saudaveis}
+          total={data.total}
+          cor="text-[var(--accent-app-text)]"
+          bg="bg-[var(--accent-app-soft-bg)]"
+          icon={CheckCircle2}
+        />
+        <HealthStat
+          label="Abaixo do sugerido"
+          value={data.abaixoSugerido}
+          total={data.total}
+          cor="text-[var(--warning-app)]"
+          bg="bg-[var(--warning-app-bg)]"
+          icon={TrendingDown}
+        />
+        <HealthStat
+          label="Abaixo do equilíbrio"
+          value={data.abaixoEquilibrio}
+          total={data.total}
+          cor="text-[var(--danger-app)]"
+          bg="bg-[var(--danger-app-bg)]"
+          icon={AlertTriangle}
+        />
+        <HealthStat
+          label="Sem preço"
+          value={data.semPreco}
+          total={data.total}
+          cor="text-[var(--text-app-muted)]"
+          bg="bg-[var(--bg-app-alt-strong)]"
+          icon={Clock}
+        />
+      </div>
+
+      {/* Lista de procedimentos abaixo do equilíbrio (top 3) */}
+      {data.abaixoEquilibrio > 0 && (
+        <div className="bg-[var(--danger-app-bg)] border border-[var(--danger-app-border)] rounded-lg p-3">
+          <h5 className="text-xs font-semibold text-[var(--danger-app)] mb-2 flex items-center gap-1.5">
+            <AlertTriangle size={13} />
+            Procedimentos abaixo do ponto de equilíbrio
+          </h5>
+          <ul className="space-y-1.5">
+            {data.procedimentos
+              .filter((p) => p.abaixoEquilibrio)
+              .slice(0, 3)
+              .map((p) => (
+                <li key={p.id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-[var(--text-app)] truncate">{p.nome}</span>
+                  <span className="font-mono tabular-nums shrink-0">
+                    <span className="text-[var(--danger-app)]">{brl(p.precoFinal)}</span>
+                    <span className="text-[var(--text-app-faint)] mx-1">vs</span>
+                    <span className="text-[var(--text-app-secondary)]">{brl(p.pontoEquilibrio)}</span>
+                  </span>
+                </li>
+              ))}
+          </ul>
+          {data.abaixoEquilibrio > 3 && (
+            <p className="text-[11px] text-[var(--text-app-muted)] mt-2">
+              +{data.abaixoEquilibrio - 3} outro(s) — ver na aba Procedimentos
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HealthStat({
+  label,
+  value,
+  total,
+  cor,
+  bg,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  cor: string;
+  bg: string;
+  icon: typeof Clock;
+}) {
+  const pct = total > 0 ? (value / total) * 100 : 0;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`border border-[var(--border-app)] rounded-xl p-3 ${bg}`}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-muted)] font-medium">
+          {label}
+        </span>
+        <Icon size={13} className="text-[var(--text-app-faint)]" />
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-2xl font-mono tabular-nums font-semibold ${cor}`}>
+          {value}
+        </span>
+        <span className="text-[11px] text-[var(--text-app-muted)]">
+          / {total} ({pct.toFixed(0)}%)
+        </span>
+      </div>
+    </motion.div>
   );
 }

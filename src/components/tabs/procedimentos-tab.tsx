@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -22,6 +22,7 @@ import { toast } from "sonner";
 
 import { apiFetch, useAuth } from "@/lib/auth-store";
 import { brl, num, pct } from "@/lib/utils";
+import { onNovoItem } from "@/lib/atalhos";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -335,6 +336,12 @@ function ProcedimentosListPane({
   const [novoOpen, setNovoOpen] = useState(false);
   const [novoNome, setNovoNome] = useState("");
 
+  // Atalho 'n' abre o dialog de novo procedimento (só se pode editar)
+  useEffect(() => {
+    if (!podeEditar) return;
+    return onNovoItem(() => setNovoOpen(true));
+  }, [podeEditar]);
+
   const addMut = useMutation({
     mutationFn: (nome: string) =>
       apiFetch<Procedimento>("/api/procedimentos", {
@@ -368,9 +375,13 @@ function ProcedimentosListPane({
             type="button"
             size="sm"
             onClick={() => setNovoOpen(true)}
+            title="Criar novo procedimento (n)"
             className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)] h-8"
           >
             <Plus size={14} /> Novo
+            <kbd className="hidden sm:inline-block ml-1.5 px-1 py-0.5 text-[10px] font-mono bg-white/20 border border-white/20 rounded">
+              n
+            </kbd>
           </Button>
         )}
       </div>

@@ -1058,3 +1058,130 @@ Task: 4 novas features (filtro agenda por período, pie chart de status, workflo
 6. **Tooltips explicativos** em todos os badges de status (já implementado em glosas, estender para contas)
 7. **Filtro de procedimentos por faixa de preço** no Início (quantos estão abaixo do ponto de equilíbrio)
 8. **Testes** automatizados com Playwright
+
+---
+Task ID: T8 (cron rodada 4 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: 1 bugfix + 4 novas features (atalho 'n' em 3 abas, tooltips em status badges, timeline 8 semanas, saúde dos procedimentos)
+
+## Avaliação do status atual (início da rodada)
+- T7 (rodada anterior) deixou projeto em v2.2 estável com 13 features
+- QA inicial via agent-browser: login OK, sem bugs de runtime identificados
+- Prioridades sugeridas: paginação, atalho 'n' em outras abas, tooltips, mini-gráfico semanal
+- Esta rodada implementei: 1 bugfix + 4 novas features (pulei paginação por envolver refactor grande)
+
+## Work Log
+
+### BUGFIX: invalidarAgenda em modo semana/mês
+- **Problema**: quando o usuário criava um agendamento no modo "dia", apenas a query da data específica era invalidada — ao trocar para modo "semana" ou "mês", o cache do TanStack não via o novo agendamento até forçar refresh
+- **Solução**: `invalidarAgenda` agora SEMPRE invalida 3 query keys (não depende mais do modo):
+  1. `["agendamentos", dataSelecionada]` (modo dia)
+  2. `["agendamentos", "periodo"]` (todos os períodos — refaz ao trocar modo)
+  3. `["agendamentos", "resumo-status"]` (pie chart no Início)
+- `_modo` agora é prefixed underscore para indicar não usado (preserva assinatura por compat)
+
+### FUNCIONALIDADE 1: Atalho 'n' em 3 abas (Procedimentos + Financeiro×2)
+- Criado `src/lib/atalhos.ts` em T7 — reutilizado nesta rodada
+- **ProcedimentosTab**: `useEffect` registra handler via `onNovoItem(() => setNovoOpen(true))` — só se `podeEditar`
+  - Botão "Novo" ganhou kbd hint `<kbd>n</kbd>` com bg-white/20 e title "Criar novo procedimento (n)"
+  - QA: pressionei Ctrl+3 → pressionei 'n' → dialog "Novo procedimento" abriu ✓
+- **ContasReceberPanel**: `useEffect` registra handler — só se `podeEditar`
+- **ContasPagarPanel**: idem
+- **ConveniosPanel**: idem
+- Mecanismo: como o Radix Tabs só renderiza o conteúdo ativo (unmounted otherwise), apenas o handler da sub-tab ativa fica registrado — não há conflito
+- QA: Ctrl+5 → cliquei "Contas a receber" → pressionei 'n' → dialog "Novo lançamento — conta a receber" abriu ✓
+
+### FUNCIONALIDADE 2: Tooltips explicativos em todos os status badges
+- **Setup global**: adicionado `<TooltipProvider delayDuration={300} skipDelayDuration={500}>` em `providers.tsx` — cobre toda a app
+- **Mapeamentos de descrição**: extendidos `STATUS_RECEBER`, `STATUS_PAGAR`, `STATUS_GLOSA` (financeiro) e `STATUS_AGENDAMENTO` (agenda) com campo `descricao: string`
+  - 14 descrições escritas (5 status agenda + 5 receber + 4 pagar + 4 glosa)
+  - Exemplos: "Aguardando pagamento do paciente ou convênio", "Convênio recusou parte do valor faturado", "Paciente não compareceu sem aviso prévio"
+- **StatusBadge** (financeiro) e **inline badge** (agenda) envolvidos com `<UITooltip>` (shadcn, aliased p/ não conflitar com `Tooltip` do recharts)
+  - Importado como `Tooltip as UITooltip, TooltipTrigger as UITooltipTrigger, TooltipContent as UITooltipContent`
+  - Tooltip mostrando: label (bold) + descricao (11px opacity-90)
+  - Estilo: `bg-[var(--text-app)] text-[var(--bg-app)]` (cores invertidas pro contraste) + `max-w-[220px]`
+  - Adicionado `cursor-help` no span do badge pra indicar interatividade
+  - Skip badge se `descricao` undefined (preserva retrocompat)
+
+### FUNCIONALIDADE 3: Linha do tempo de agendamentos (últimas 8 semanas)
+- **Backend**: `GET /api/agendamentos/historico-8-semanas` novo
+  - Retorna 8 semanas terminando na semana atual (segunda a domingo, padrão BR)
+  - Cada semana: `{ semanaInicio, semanaFim, label, total, porStatus: [{status, total}] }`
+  - Garante que todos os 5 status apareçam (mesmo com zero) — facilita o frontend
+- **Frontend**: `TimelineAgendamentosCard` em `inicio-tab.tsx`
+  - Stacked bar horizontal SVG puro (sem recharts): cada semana = barra com 5 segmentos coloridos por status
+  - Largura da barra = (total / maxTotal) * 100% — comparação visual entre semanas
+  - Label à esquerda "dd/mm – dd/mm" (formato BR)
+  - Total à direita em font-mono
+  - **Indicador "semana atual"**: dot accent no início do label da semana atual
+  - Legenda abaixo com 5 cores + nomes dos status
+  - **Tendência vs semana anterior**: mostra delta (+N ou -N) com seta ↑/↓ colorida
+  - Loading: 8 skeletons h-6
+- QA: abri Início → viu 8 semanas com "21/09 – 27/09 = 1" (João Teste) + legenda + "Tendência vs semana anterior: ↑ +1"
+
+### FUNCIONALIDADE 4: Saúde dos Procedimentos (preço vs equilíbrio)
+- **Backend**: `GET /api/procedimentos/health-check` novo
+  - Carrega custo/minuto da clínica (igual /api/resumo), todos os procedimentos ativos e seus itens de uma vez
+  - Executa `calcProcedimento` para cada um (função pura do engine.ts)
+  - Retorna 4 flags por procedimento: `abaixoEquilibrio`, `abaixoSugerido`, `semPreco`, mais `lucratividadeFinal`
+  - Top-level: `total`, `abaixoEquilibrio`, `abaixoSugerido`, `semPreco` (contadores)
+  - Otimização: 1 query só para todos os ProcedimentoInsumo (em vez de N queries por procedimento)
+- **Frontend**: `SaudeProcedimentosCard` em `inicio-tab.tsx`
+  - 4 StatCards em grid 2x2 / 4x1: Saudáveis (accent), Abaixo do sugerido (warning), Abaixo do equilíbrio (danger), Sem preço (muted)
+  - Cada card mostra: valor / total (pct%)
+  - **Banner vermelho** abaixo dos cards lista até 3 procedimentos abaixo do equilíbrio:
+    - Nome + "R$ X vs R$ Y" (preçoFinal vs pontoEquilibrio)
+    - Se > 3, "+N outro(s) — ver na aba Procedimentos"
+  - Empty state "Nenhum procedimento cadastrado"
+  - Error state se capacidade produtiva não configurada
+- QA: vi "Saudáveis 1/1 (100%), Abaixo do sugerido 0, Abaixo do equilíbrio 0, Sem preço 0" (único procedimento "Radiografia panorâmica" com preço R$ 25,00 > equilíbrio R$ 13,58)
+
+### STYLING (mandatório)
+- **Tooltip shadcn** com cores invertidas (bg text-app, text bg-app) — contraste alto e elegante
+- **Badge `cursor-help`** indica hover interativo
+- **TimelineAgendamentosCard**: barras com `transition-all duration-500` (anima ao montar), cores mapeadas do tema, separadores entre segmentos `border-l border-[var(--surface-app)]/30`
+- **Dot indicador** de semana atual: pequeno círculo accent (1.5px) antes do label
+- **SaudeProcedimentosCard**: HealthStat cards com `motion.div` entrada (opacity+y), cada um com bg específico (accent-soft-bg, warning-bg, danger-bg, bg-alt-strong)
+- **Banner de procedimentos abaixo do equilíbrio**: bg danger-bg + border danger-border + ícone AlertTriangle inline
+- **Atalho 'n' no botão Novo (Procedimentos)**: kbd com `bg-white/20 border-white/20` (contraste no botão accent)
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **17 features totais** (acumuladas de T5+T6+T7+T8):
+  - 6 abas (Início, Custos, Procedimentos, Agenda, Financeiro, Usuários)
+  - Atalhos Ctrl+1..6 + Ctrl+K (busca) + **n (novo item em 4 contextos: Agenda, Procedimentos, ContasReceber, ContasPagar, Convenios)**
+  - Busca global command palette
+  - Configurações da clínica (nome + CNPJ)
+  - Sparklines 6 meses + Donut status (próx 30 dias) + **Timeline 8 semanas**
+  - **Saúde dos Procedimentos** (4 categorias: saudáveis/abaixo sugerido/abaixo equilíbrio/sem preço)
+  - Agenda com toggle Dia/Semana/Mês + agrupamento por data
+  - Workflow de glosas com prazos + banner + badges de dias
+  - **Tooltips explicativos em todos os status badges** (14 descrições em 4 categorias)
+  - Exportação CSV + Imprimir em 3 painéis do Financeiro
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados
+
+### Modificações concluídas
+- **1 bugfix**: invalidarAgenda agora invalida período + resumo-status também no modo dia
+- **2 novos endpoints**: `/api/agendamentos/historico-8-semanas`, `/api/procedimentos/health-check`
+- **3 arquivos modificados**: `agenda-tab.tsx` (tooltips + invalidarAgenda), `financeiro-tab.tsx` (tooltips + atalho 'n' em 3 panels), `inicio-tab.tsx` (timeline + saúde), `procedimentos-tab.tsx` (atalho 'n' + kbd hint), `providers.tsx` (TooltipProvider)
+- 4 screenshots em `/home/z/my-project/download/`:
+  - `inicio-v2.3.png`, `inicio-v2.3-saude.png`, `inicio-saude-procedimentos.png`
+
+### Issues/risks não resolvidos
+- Paginação nas tabelas longas (Contas a Receber/Pagar) — ainda não implementada (prioridade baixa)
+- Sem testes automatizados (Playwright/Vitest)
+- `/api/busca` ainda traz tudo da clínica (suficiente p/ SQLite single-tenant)
+- Tooltips em status badges só funcionam em hover (sem fallback mobile)
+
+### Prioridades recomendadas para próxima rodada (cron 15 min)
+1. **Paginação nas tabelas longas** (Contas a Receber/Pagar) — `useInfiniteQuery` + botão "Carregar mais"
+2. **Modo de impressão dedicado** pra agenda do dia (PDF com layout otimizado pra balcão)
+3. **Workflow de glosas com prazos configuráveis** (permitir definir prazo por convênio)
+4. **Filtro avançado no health-check**: botão "ver apenas abaixo do equilíbrio" que filtra a lista
+5. **Indicadores de fluxo de caixa**: barra mostrando 30/60/90 dias de projeção
+6. **Tooltips em KPI cards** explicando o que cada métrica significa (ex: "Resultado = receitas - despesas pagas")
+7. **Testes** automatizados com Playwright
+8. **Performance**: lazy load do donut-chart, sparkline, timeline (atualmente carregam junto no Início)

@@ -3,6 +3,7 @@
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [qc] = useState(
@@ -25,7 +26,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       enableSystem={false}
       disableTransitionOnChange
     >
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      <QueryClientProvider client={qc}>
+        <TooltipProvider delayDuration={300} skipDelayDuration={500}>
+          {children}
+        </TooltipProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

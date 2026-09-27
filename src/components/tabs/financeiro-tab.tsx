@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -47,6 +47,12 @@ import {
 import { apiFetch, useAuth } from "@/lib/auth-store";
 import { brl, pct, num, hoje, mesAtual, dataBR, cn, nomeMes } from "@/lib/utils";
 import { exportarCSV, imprimirTabela, fmtBRL, fmtPct } from "@/lib/export";
+import { onNovoItem } from "@/lib/atalhos";
+import {
+  Tooltip as UITooltip,
+  TooltipTrigger as UITooltipTrigger,
+  TooltipContent as UITooltipContent,
+} from "@/components/ui/tooltip";
 import {
   Tabs,
   TabsList,
@@ -267,67 +273,80 @@ interface ProducaoConvenio extends ContaReceber {
 // ---------------------------------------------------------------------------
 // Status configs (matches original FinanceiroModule.jsx, ported to *-app vars)
 // ---------------------------------------------------------------------------
-const STATUS_RECEBER: Record<string, { label: string; badge: string }> = {
+const STATUS_RECEBER: Record<string, { label: string; badge: string; descricao: string }> = {
   aberto: {
     label: "Em aberto",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-secondary)]",
+    descricao: "Aguardando pagamento do paciente ou convênio.",
   },
   recebido: {
     label: "Recebido",
     badge:
       "bg-[var(--accent-app-soft-bg-strong)] text-[var(--accent-app-text)]",
+    descricao: "Pagamento recebido integralmente.",
   },
   vencido: {
     label: "Vencido",
     badge: "bg-[var(--danger-app-bg-strong)] text-[var(--danger-app)]",
+    descricao: "Data de vencimento ultrapassada sem pagamento.",
   },
   parcial: {
     label: "Parcial",
     badge: "bg-[var(--warning-app-bg-strong)] text-[var(--warning-app)]",
+    descricao: "Parte do valor foi recebido; resto ainda pendente.",
   },
   cancelado: {
     label: "Cancelado",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-faint)]",
+    descricao: "Lançamento cancelado (não entra em relatórios).",
   },
 };
 
-const STATUS_PAGAR: Record<string, { label: string; badge: string }> = {
+const STATUS_PAGAR: Record<string, { label: string; badge: string; descricao: string }> = {
   aberto: {
     label: "Em aberto",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-secondary)]",
+    descricao: "Aguardando pagamento ao fornecedor.",
   },
   pago: {
     label: "Pago",
     badge:
       "bg-[var(--accent-app-soft-bg-strong)] text-[var(--accent-app-text)]",
+    descricao: "Conta quitada integralmente.",
   },
   vencido: {
     label: "Vencido",
     badge: "bg-[var(--danger-app-bg-strong)] text-[var(--danger-app)]",
+    descricao: "Vencimento ultrapassado sem pagamento.",
   },
   cancelado: {
     label: "Cancelado",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-faint)]",
+    descricao: "Conta cancelada (não entra em relatórios).",
   },
 };
 
-const STATUS_GLOSA: Record<string, { label: string; badge: string }> = {
+const STATUS_GLOSA: Record<string, { label: string; badge: string; descricao: string }> = {
   glosada: {
     label: "Glosada",
     badge: "bg-[var(--danger-app-bg-strong)] text-[var(--danger-app)]",
+    descricao: "Convênio recusou parte do valor faturado.",
   },
   em_recurso: {
     label: "Em recurso",
     badge: "bg-[var(--warning-app-bg-strong)] text-[var(--warning-app)]",
+    descricao: "Clínica contestou a glosa; aguardando resposta do convênio.",
   },
   recuperada: {
     label: "Recuperada",
     badge:
       "bg-[var(--accent-app-soft-bg-strong)] text-[var(--accent-app-text)]",
+    descricao: "Valor recuperado após recurso da clínica.",
   },
   perdida: {
     label: "Perdida",
     badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-faint)]",
+    descricao: "Recurso da clínica não aceito; valor definitivamente perdido.",
   },
 };
 
@@ -554,21 +573,36 @@ function MonthPicker({
   );
 }
 
-// Reusable status badge
+// Reusable status badge com tooltip explicativo
 function StatusBadge({
   status,
   config,
 }: {
   status: string;
-  config: Record<string, { label: string; badge: string }>;
+  config: Record<string, { label: string; badge: string; descricao?: string }>;
 }) {
   const st = config[status] ?? { label: status, badge: "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)]" };
-  return (
+  const badge = (
     <span
-      className={`text-[11px] rounded-full px-2 py-0.5 shrink-0 whitespace-nowrap ${st.badge}`}
+      className={`text-[11px] rounded-full px-2 py-0.5 shrink-0 whitespace-nowrap cursor-help ${st.badge}`}
     >
       {st.label}
     </span>
+  );
+  if (!st.descricao) return badge;
+  return (
+    <UITooltip>
+      <UITooltipTrigger asChild>{badge}</UITooltipTrigger>
+      <UITooltipContent
+        side="top"
+        className="bg-[var(--text-app)] text-[var(--bg-app)] text-xs max-w-[220px] border-none"
+      >
+        <div className="space-y-0.5">
+          <div className="font-semibold">{st.label}</div>
+          <div className="text-[11px] opacity-90">{st.descricao}</div>
+        </div>
+      </UITooltipContent>
+    </UITooltip>
   );
 }
 
@@ -867,6 +901,12 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
   const [convenioFilter, setConvenioFilter] = useState<string>("");
   const [novoOpen, setNovoOpen] = useState(false);
   const [glosaConta, setGlosaConta] = useState<ContaReceber | null>(null);
+
+  // Atalho 'n' abre o dialog de novo lançamento (só se pode editar)
+  useEffect(() => {
+    if (!podeEditar) return;
+    return onNovoItem(() => setNovoOpen(true));
+  }, [podeEditar]);
 
   const contasQ = useQuery<ContaReceber[]>({
     queryKey: [
@@ -1632,6 +1672,12 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
   const [mes, setMes] = useState<string>(mesAtual());
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [novoOpen, setNovoOpen] = useState(false);
+
+  // Atalho 'n' abre o dialog de nova conta a pagar
+  useEffect(() => {
+    if (!podeEditar) return;
+    return onNovoItem(() => setNovoOpen(true));
+  }, [podeEditar]);
 
   const contasQ = useQuery<ContaPagar[]>({
     queryKey: ["contas-pagar", { mes, status: statusFilter }],
@@ -2436,6 +2482,12 @@ function ConveniosPanel({ podeEditar }: { podeEditar: boolean }) {
   const [novoOpen, setNovoOpen] = useState(false);
   const [editConv, setEditConv] = useState<Convenio | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Atalho 'n' abre o dialog de novo convênio
+  useEffect(() => {
+    if (!podeEditar) return;
+    return onNovoItem(() => setNovoOpen(true));
+  }, [podeEditar]);
 
   const q = useQuery<Convenio[]>({
     queryKey: ["convenios"],
