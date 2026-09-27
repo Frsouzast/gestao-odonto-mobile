@@ -14,6 +14,7 @@ interface ContaPagarCreateBody {
 // Lista as contas a pagar da clinica com filtros opcionais via query string:
 //   ?status=...      — filtra por status exato (aberto|pago|vencido|cancelado)
 //   ?mes=YYYY-MM     — filtra vencimento comecando com "YYYY-MM-" (startsWith)
+//   ?limit=N&offset=N — paginacao (default: sem limite; max 200)
 // Ordenacao: vencimento ASC. Requer apenas Bearer.
 export async function GET(req: NextRequest) {
   try {
@@ -24,6 +25,8 @@ export async function GET(req: NextRequest) {
 
     const status = req.nextUrl.searchParams.get("status") || undefined;
     const mes = req.nextUrl.searchParams.get("mes") || undefined;
+    const limitParam = req.nextUrl.searchParams.get("limit");
+    const offsetParam = req.nextUrl.searchParams.get("offset");
 
     const where: {
       clinicaId: string;
@@ -32,6 +35,27 @@ export async function GET(req: NextRequest) {
     } = { clinicaId: auth.clinicaId };
     if (status) where.status = status;
     if (mes) where.vencimento = { startsWith: mes };
+
+    // Paginação opcional — se `limit` vier, retorna {rows, total, hasMore}
+    const limit = limitParam ? Math.min(Math.max(parseInt(limitParam) || 20, 1), 200) : null;
+    const offset = offsetParam ? Math.max(parseInt(offsetParam) || 0, 0) : 0;
+
+    if (limit !== null) {
+      const [rows, total] = await Promise.all([
+        db.contaPagar.findMany({
+          where,
+          orderBy: { vencimento: "asc" },
+          take: limit,
+          skip: offset,
+        }),
+        db.contaPagar.count({ where }),
+      ]);
+      return NextResponse.json({
+        rows,
+        total,
+        hasMore: offset + limit < total,
+      });
+    }
 
     const rows = await db.contaPagar.findMany({
       where,

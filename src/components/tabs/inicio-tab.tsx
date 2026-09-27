@@ -115,10 +115,19 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--accent-app)] to-[var(--accent-app-hover)] text-white p-5 sm:p-6 shadow-sm"
+        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--accent-app)] to-[var(--accent-app-hover)] text-white p-5 sm:p-6 shadow-lg shadow-[var(--accent-app)]/10"
       >
+        {/* Decorative blobs */}
         <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-16 -left-8 w-40 h-40 rounded-full bg-black/10 blur-2xl" />
+        {/* Subtle grid pattern overlay */}
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: `linear-gradient(white 1px, transparent 1px), linear-gradient(90deg, white 1px, transparent 1px)`,
+            backgroundSize: "24px 24px",
+          }}
+        />
         <div className="relative flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-wide text-white/70 mb-1">
@@ -131,7 +140,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
               {nomeMes(mes)} · {dataBR(dataHoje)}
             </p>
           </div>
-          <div className="hidden sm:flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-lg px-3 py-2">
+          <div className="hidden sm:flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
             <Stethoscope size={18} />
             <span className="text-xs font-medium uppercase tracking-wide">{usuario?.clinica.nome}</span>
           </div>
@@ -636,8 +645,11 @@ function KpiCard({
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-3 sm:p-4 hover:border-[var(--border-app-strong)] hover:shadow-sm transition-all"
+      whileHover={{ y: -2 }}
+      className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-3 sm:p-4 hover:border-[var(--accent-app-soft-border)] hover:shadow-md hover:shadow-[var(--accent-app)]/5 transition-all relative overflow-hidden"
     >
+      {/* Subtle gradient shimmer on hover */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-app)]/[0.02] to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
       <div className="flex items-center justify-between mb-1.5">
         {descricao ? (
           <UITooltip>
@@ -682,7 +694,7 @@ function AtalhoCard({
   return (
     <button
       onClick={onClick}
-      className="group bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4 text-left hover:border-[var(--accent-app-soft-border)] hover:bg-[var(--accent-app-soft-bg)] hover:shadow-sm transition-all"
+      className="group bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4 text-left hover:border-[var(--accent-app-soft-border)] hover:bg-[var(--accent-app-soft-bg)] hover:shadow-md hover:shadow-[var(--accent-app)]/5 hover:-translate-y-0.5 transition-all"
     >
       <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-lg bg-[var(--bg-app-alt-strong)] group-hover:bg-[var(--accent-app)] group-hover:text-white text-[var(--text-app-muted)] grid place-items-center transition-colors shrink-0">

@@ -26,6 +26,7 @@ import {
   Save,
   CalendarDays,
   Banknote,
+  Info,
   Receipt,
   BadgeCheck,
   Clock,
@@ -373,6 +374,7 @@ function StatCard({
   accent,
   warning,
   danger,
+  descricao,
 }: {
   label: string;
   value: string;
@@ -381,10 +383,24 @@ function StatCard({
   accent?: boolean;
   warning?: boolean;
   danger?: boolean;
+  descricao?: string;
 }) {
+  const labelEl = (
+    <div className="text-[11px] uppercase tracking-wide text-[var(--text-app-muted)] truncate flex items-center gap-1">
+      {label}
+      {descricao && (
+        <Info
+          size={10}
+          className="text-[var(--text-app-faint)] opacity-60 hover:opacity-100 shrink-0"
+        />
+      )}
+    </div>
+  );
   return (
-    <Card className={cardCls}>
-      <div className="px-4 py-3 flex items-start gap-3">
+    <Card className={`${cardCls} hover:shadow-md hover:shadow-[var(--accent-app)]/5 transition-all relative overflow-hidden`}>
+      {/* Subtle gradient shimmer on hover */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-app)]/[0.02] to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+      <div className="px-4 py-3 flex items-start gap-3 relative">
         {icon && (
           <div
             className={`w-8 h-8 rounded-lg grid place-items-center shrink-0 ${
@@ -401,9 +417,24 @@ function StatCard({
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wide text-[var(--text-app-muted)] truncate">
-            {label}
-          </div>
+          {descricao ? (
+            <UITooltip>
+              <UITooltipTrigger asChild>
+                <span className="cursor-help inline-flex">{labelEl}</span>
+              </UITooltipTrigger>
+              <UITooltipContent
+                side="bottom"
+                className="bg-[var(--text-app)] text-[var(--bg-app)] text-xs max-w-[200px] border-none"
+              >
+                <div className="space-y-0.5">
+                  <div className="font-semibold">{label}</div>
+                  <div className="text-[11px] opacity-90">{descricao}</div>
+                </div>
+              </UITooltipContent>
+            </UITooltip>
+          ) : (
+            labelEl
+          )}
           <div
             className={`text-xl font-mono tabular-nums ${
               accent
@@ -789,11 +820,13 @@ function DashboardPanel() {
             value={brl(q.data.receitas)}
             icon={<ArrowDownCircle size={16} />}
             accent
+            descricao="Soma dos valores recebidos (parcial ou total) neste mês."
           />
           <StatCard
             label="Despesas pagas"
             value={brl(q.data.despesas)}
             icon={<ArrowUpCircle size={16} />}
+            descricao="Contas a pagar marcadas como 'pago' com vencimento neste mês."
           />
           <StatCard
             label="Resultado"
@@ -802,16 +835,19 @@ function DashboardPanel() {
             icon={<TrendingUp size={16} />}
             accent={q.data.resultado >= 0}
             danger={q.data.resultado < 0}
+            descricao="Receitas menos despesas pagas. Não inclui contas em aberto."
           />
           <StatCard
             label="A receber"
             value={brl(q.data.aReceber)}
             icon={<Receipt size={16} />}
+            descricao="Soma das contas a receber em aberto (status 'aberto', 'vencido' ou 'parcial')."
           />
           <StatCard
             label="A pagar"
             value={brl(q.data.aPagar)}
             icon={<Banknote size={16} />}
+            descricao="Soma das contas a pagar em aberto (status 'aberto' ou 'vencido')."
           />
           <StatCard
             label="Inadimplência"
@@ -821,6 +857,7 @@ function DashboardPanel() {
             }
             icon={<AlertTriangle size={16} />}
             danger={q.data.inadimplencia > 0}
+            descricao="Soma das contas a receber com status 'vencido' (data ultrapassada sem pagamento)."
           />
         </div>
       )}
@@ -1745,15 +1782,39 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
     return onNovoItem(() => setNovoOpen(true));
   }, [podeEditar]);
 
-  const contasQ = useQuery<ContaPagar[]>({
-    queryKey: ["contas-pagar", { mes, status: statusFilter }],
+  const PAGE_SIZE_PAGAR = 20;
+  const [paginaPagar, setPaginaPagar] = useState(0);
+
+  interface ContasPagarPaginado {
+    rows: ContaPagar[];
+    total: number;
+    hasMore: boolean;
+  }
+
+  const contasQ = useQuery<ContasPagarPaginado>({
+    queryKey: ["contas-pagar", { mes, status: statusFilter, pagina: paginaPagar }],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("mes", mes);
       if (statusFilter) params.set("status", statusFilter);
-      return apiFetch<ContaPagar[]>(`/api/contas-pagar?${params.toString()}`);
+      params.set("limit", String(PAGE_SIZE_PAGAR));
+      params.set("offset", String(paginaPagar * PAGE_SIZE_PAGAR));
+      return apiFetch<ContasPagarPaginado>(`/api/contas-pagar?${params.toString()}`);
     },
   });
+
+  const contasPagar = contasQ.data?.rows ?? [];
+  const contasPagarTotal = contasQ.data?.total ?? 0;
+  const contasPagarHasMore = contasQ.data?.hasMore ?? false;
+
+  const trocarMesPagar = (novo: string) => {
+    setMes(novo);
+    setPaginaPagar(0);
+  };
+  const trocarStatusPagar = (novo: string) => {
+    setStatusFilter(novo);
+    setPaginaPagar(0);
+  };
 
   // Despesas recorrentes sub-section
   const recorrentesQ = useQuery<DespesaRecorrente[]>({
@@ -1828,7 +1889,7 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
       transition={{ duration: 0.2 }}
       className="space-y-4"
     >
-      <MonthPicker mes={mes} setMes={setMes} />
+      <MonthPicker mes={mes} setMes={trocarMesPagar} />
 
       {/* Filters + actions */}
       <Card className={cardCls}>
@@ -1839,7 +1900,7 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
             </Label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => trocarStatusPagar(e.target.value)}
               className={`w-full h-9 rounded-md border px-2.5 text-sm ${selectCls}`}
             >
               <option value="">Todos</option>
@@ -1887,8 +1948,13 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
             Contas do mês
           </h3>
           <span className="text-[11px] text-[var(--text-app-muted)]">
-            {(contasQ.data ?? []).length}{" "}
-            {(contasQ.data ?? []).length === 1 ? "item" : "itens"}
+            {contasPagarTotal}{" "}
+            {contasPagarTotal === 1 ? "item" : "itens"}
+            {contasPagarTotal > contasPagar.length && (
+              <span className="text-[var(--text-app-faint)] ml-1">
+                · mostrando {contasPagar.length}
+              </span>
+            )}
           </span>
         </div>
 
@@ -1899,7 +1965,7 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
             message={contasQ.error?.message ?? "Falha ao carregar"}
             onRetry={() => contasQ.refetch()}
           />
-        ) : (contasQ.data ?? []).length === 0 ? (
+        ) : contasPagar.length === 0 ? (
           <EmptyState
             icon={<ArrowUpCircle size={22} strokeWidth={1.5} />}
             title="Nenhuma conta neste mês"
@@ -1933,7 +1999,7 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(contasQ.data ?? []).map((c) => (
+                {contasPagar.map((c) => (
                   <TableRow
                     key={c.id}
                     className="border-t border-[var(--border-app-subtle)] hover:bg-[var(--bg-app)]/40"
@@ -2034,6 +2100,38 @@ function ContasPagarPanel({ podeEditar }: { podeEditar: boolean }) {
                 ))}
               </TableBody>
             </Table>
+          </div>
+        )}
+
+        {/* Paginação */}
+        {contasPagarTotal > PAGE_SIZE_PAGAR && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-[var(--border-app-subtle)] text-xs">
+            <span className="text-[var(--text-app-muted)]">
+              Página {paginaPagar + 1} de {Math.ceil(contasPagarTotal / PAGE_SIZE_PAGAR)} ·{" "}
+              {contasPagarTotal} {contasPagarTotal === 1 ? "item" : "itens"} no total
+            </span>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPaginaPagar((p) => Math.max(0, p - 1))}
+                disabled={paginaPagar === 0}
+                className="h-7 text-[11px] bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+              >
+                <ChevronLeft size={12} /> Anterior
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPaginaPagar((p) => p + 1)}
+                disabled={!contasPagarHasMore}
+                className="h-7 text-[11px] bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+              >
+                Próxima <ChevronRight size={12} />
+              </Button>
+            </div>
           </div>
         )}
       </Card>

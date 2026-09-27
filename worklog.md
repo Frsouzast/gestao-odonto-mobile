@@ -1319,3 +1319,96 @@ Task: 4 novas features (fluxo caixa projetado, tooltips em KPIs, impressão agen
 6. **Performance**: lazy load do donut-chart, sparkline, timeline
 7. **Testes** automatizados com Playwright
 8. **Modo de impressão** pra Contas a Pagar e DRE (já existe CSV/Imprimir genérico, mas layout dedicado seria melhor)
+
+---
+Task ID: T10 (cron rodada 6 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: Paginação estendida + tooltips em Dashboard + styling refinado
+
+## Avaliação do status atual (início da rodada)
+- T9 (rodada anterior) deixou projeto em v2.2 estável com 21 features
+- QA inicial via agent-browser: login OK, sem bugs de runtime identificados
+- Prioridades sugeridas: estender paginação, tooltips em KPIs do Dashboard, modal fluxo caixa, lazy load
+- Esta rodada implementei: extensão de paginação p/ Contas a Pagar, tooltips em 6 StatCards do Financeiro Dashboard, e refinamentos visuais
+
+## Work Log
+
+### Backend: 2 endpoints modificados
+- **`/api/contas-pagar` (GET)** modificado para aceitar `?limit=N&offset=N`
+  - Se `limit` vier, retorna `{rows, total, hasMore}` (formato paginado)
+  - Se não vier, mantém comportamento retrocompatível (array direto)
+  - Max 200 por página
+- **`/api/glosas` (GET)** modificado para aceitar `?status=...&limit=N&offset=N`
+  - Refatorado com helper `mapGlosa` extraído para reutilização entre caminho paginado e não-paginado
+  - Mesmo formato `{rows, total, hasMore}` quando `limit` vem
+  - Filtro `status` agora aplicado no backend (antes era só frontend)
+
+### FUNCIONALIDADE 1: Paginação em Contas a Pagar
+- `ContasPagarPanel` em `financeiro-tab.tsx`:
+  - `PAGE_SIZE_PAGAR = 20`, state `paginaPagar`
+  - Wrappers `trocarMesPagar`, `trocarStatusPagar` resetam página quando filtros mudam (sem useEffect)
+  - Header mostra total + "mostrando N" se houver paginação
+  - Botões "Anterior" / "Próxima" com disabled states
+  - Footer da tabela com border-top + bg surface-app
+- Substituídas todas as referências `(contasQ.data ?? [])` por `contasPagar` (variável derivada `contasQ.data?.rows ?? []`)
+- QA: entrou em Contas a Pagar → "0 itens" → sem paginação (correto)
+
+### FUNCIONALIDADE 2: Tooltips em StatCards do Financeiro Dashboard
+- Estendido `StatCard` em `financeiro-tab.tsx` com prop `descricao?: string`
+- Se `descricao` presente: ícone `Info` (10px, lucide) ao lado do label + `<UITooltip>` envolvendo o label
+- 6 descrições adicionadas aos StatCards do DashboardPanel:
+  - **Receitas do mês**: "Soma dos valores recebidos (parcial ou total) neste mês."
+  - **Despesas pagas**: "Contas a pagar marcadas como 'pago' com vencimento neste mês."
+  - **Resultado**: "Receitas menos despesas pagas. Não inclui contas em aberto."
+  - **A receber**: "Soma das contas a receber em aberto (status 'aberto', 'vencido' ou 'parcial')."
+  - **A pagar**: "Soma das contas a pagar em aberto (status 'aberto' ou 'vencido')."
+  - **Inadimplência**: "Soma das contas a receber com status 'vencido' (data ultrapassada sem pagamento)."
+- QA: 6 ícones `lucide-info` confirmados no Dashboard via `document.querySelectorAll`
+
+### STYLING (mandatório)
+- **Hero card** (Início): adicionado `shadow-lg shadow-[var(--accent-app)]/10` + grid pattern overlay sutil (opacity 0.03, 24px grid) + border `border-white/10` no badge da clínica
+- **KpiCard** (Início): adicionado `whileHover={{ y: -2 }}` (framer-motion lift) + `hover:border-[var(--accent-app-soft-border)]` + `hover:shadow-md hover:shadow-[var(--accent-app)]/5` + gradient shimmer overlay (opacity 0 → 1 on hover, accent 2%)
+- **AtalhoCard** (Início): adicionado `hover:shadow-md hover:shadow-[var(--accent-app)]/5 hover:-translate-y-0.5` (lift effect)
+- **StatCard** (Financeiro): adicionado `hover:shadow-md hover:shadow-[var(--accent-app)]/5 transition-all relative overflow-hidden` + gradient shimmer overlay idêntico ao KpiCard
+- Total: 4 componentes com hover lift + gradient shimmer, criando uma sensação tátil moderna
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **23 features totais** (acumuladas de T5–T10):
+  - 6 abas, atalhos Ctrl+1..6 + Ctrl+K + n
+  - Dashboard Início com 9 seções (KPIs + Agenda hoje + Custo fixo + Procedimentos + Saúde procedimentos + Sparklines 6m + Donut status + Timeline 8 sem + Fluxo caixa 30/60/90d)
+  - **Tooltips em 12 KPI cards** (6 Início + 6 Financeiro Dashboard) + 14 status badges = 26 descrições
+  - **Paginação em 2 tabelas** (Contas a Receber + Contas a Pagar) + backend pronto para Glosas
+  - Agenda Dia/Semana/Mês + agrupamento + Impressão PDF dedicada
+  - Workflow de glosas com prazos + banner + badges
+  - Exportação CSV + Imprimir em 3 painéis do Financeiro
+  - **Styling refinado**: hero com grid pattern, cards com hover lift + gradient shimmer
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados
+
+### Modificações concluídas
+- **2 endpoints modificados**: `/api/contas-pagar` e `/api/glosas` (ambos aceitam `?limit=&offset=`)
+- **Arquivos modificados**:
+  - `src/app/api/contas-pagar/route.ts` (paginação)
+  - `src/app/api/glosas/route.ts` (paginação + filtro status + refactor mapGlosa)
+  - `src/components/tabs/financeiro-tab.tsx` (ContasPagar pagination + StatCard tooltips + Info import + 6 descrições no Dashboard)
+  - `src/components/tabs/inicio-tab.tsx` (hero grid pattern + KpiCard hover lift + AtalhoCard hover lift)
+- 1 screenshot: `inicio-v2.5.png`
+
+### Issues/risks não resolvidos
+- Glosas: backend tem paginação mas frontend ainda usa fetch-all (mudança pendente)
+- Sem testes automatizados (Playwright/Vitest)
+- Lazy load dos componentes pesados não implementado (refactor grande necessário)
+- `/api/busca` ainda traz tudo da clínica
+
+### Prioridades recomendadas para próxima rodada
+1. **Frontend paginação em Glosas** (backend já pronto)
+2. **Lazy load** dos componentes pesados do Início (extrair para arquivos separados + next/dynamic)
+3. **Modal de detalhes** do fluxo de caixa com gráfico de barras por dia
+4. **Workflow de glosas com prazos configuráveis** por convênio
+5. **Filtro avançado no health-check** (botão "ver apenas abaixo do equilíbrio")
+6. **Modo de impressão** dedicado pra Contas a Pagar e DRE
+7. **Testes** automatizados com Playwright
+8. **PWA**: service worker para uso offline (o app Electron original funcionava offline)
