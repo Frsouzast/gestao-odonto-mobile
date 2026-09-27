@@ -1412,3 +1412,86 @@ Task: Paginação estendida + tooltips em Dashboard + styling refinado
 6. **Modo de impressão** dedicado pra Contas a Pagar e DRE
 7. **Testes** automatizados com Playwright
 8. **PWA**: service worker para uso offline (o app Electron original funcionava offline)
+
+---
+Task ID: T11 (cron rodada 7 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: Health-check filter interativo + shimmer skeletons + focus-visible ring + bugfix
+
+## Avaliação do status atual (início da rodada)
+- T10 (rodada anterior) deixou projeto em v2.2 estável com 23 features
+- QA inicial via agent-browser: sem bugs de runtime identificados
+- Prioridades sugeridas: frontend paginação Glosas, filtro health-check, modal fluxo caixa, lazy load
+- Esta rodada implementei: filtro interativo no health-check + shimmer skeletons + focus ring + bugfix
+
+## Work Log
+
+### BUGFIX: useState not imported in SaudeProcedimentosCard
+- **Problema**: adicionei `useState` para o filtro do health-check mas esqueci de importar → "ReferenceError: useState is not defined" causando crash da página inteira
+- **Solução**: adicionado `import { useState } from "react"` no topo de `inicio-tab.tsx`
+- QA: achei via agent-browser (Application error: client-side exception), corrigi, recarregou — página carregou normalmente ✓
+
+### FUNCIONALIDADE 1: Filtro interativo no health-check
+- `SaudeProcedimentosCard` em `inicio-tab.tsx` estendido com state `filtro: "todos" | "abaixoEquilibrio" | "abaixoSugerido" | "semPreco"`
+- **4 HealthStat cards agora são clicáveis**: clicar em "Abaixo do equilíbrio" mostra lista filtrada
+- Card clicado fica destacado com `ring-2 ring-[cor]` (danger/warning/muted)
+- **Lista expansível** com animação framer-motion (height 0 → auto):
+  - Mostra nome do procedimento + preço final vs ponto de equilíbrio/sugerido
+  - Cores dinâmicas conforme categoria (danger/warning)
+  - Scrollable (`max-h-64 overflow-y-auto scroll-thin`) para listas longas
+  - Botão "✕ fechar" no header
+- **Banner vermelho** quando filtro = "todos" e há procedimentos abaixo do equilíbrio:
+  - "X procedimento(s) abaixo do ponto de equilíbrio"
+  - Botão "Ver lista completa →" que aplica o filtro
+- QA: vi 4 botões clicáveis ("Saudáveis 1/1 (100%)", "Abaixo do sugerido 0", "Abaixo do equilíbrio 0", "Sem preço 0") ✓
+
+### STYLING (mandatório)
+- **Shimmer skeleton animation** em `globals.css`:
+  - `@keyframes shimmer` — gradient que desliza da esquerda pra direita (1.5s infinite linear)
+  - `.shimmer` class — `background: linear-gradient(90deg, bg-app-alt-strong 25%, border-app-subtle 50%, bg-app-alt-strong 75%)` com `background-size: 200% 100%`
+  - Aplicado em 12 Skeleton components (10 no inicio-tab, 2 no financeiro-tab) — substitui o `animate-pulse` default do shadcn por efeito mais elegante
+- **Focus-visible ring** global em `globals.css`:
+  - `*:focus-visible { outline: 2px solid var(--accent-app); outline-offset: 2px; border-radius: 4px; }`
+  - `*:focus:not(:focus-visible) { outline: none; }` — desativa ring em mouse click, mantém em keyboard nav
+  - Melhora acessibilidade visual em todos os elementos interativos
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **25 features totais** (acumuladas de T5–T11):
+  - 6 abas, atalhos Ctrl+1..6 + Ctrl+K + n
+  - Dashboard Início com 9 seções incluindo **health-check com filtro interativo**
+  - **26 tooltips** (12 KPI cards + 14 status badges)
+  - Paginação em 2 tabelas (Contas Receber + Pagar) + backend pronto p/ Glosas
+  - Agenda Dia/Semana/Mês + Impressão PDF
+  - Workflow de glosas com prazos + banner + badges
+  - Exportação CSV + Imprimir em 3 painéis
+  - **Shimmer skeletons** (12 componentes) + focus-visible ring global
+  - Styling refinado: hero grid pattern, cards hover lift + gradient shimmer
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados
+
+### Modificações concluídas
+- **1 bugfix**: useState import faltante em SaudeProcedimentosCard
+- **Arquivos modificados**:
+  - `src/components/tabs/inicio-tab.tsx` (useState import + health-check filter interativo + shimmer skeletons)
+  - `src/components/tabs/financeiro-tab.tsx` (shimmer skeletons)
+  - `src/app/globals.css` (shimmer animation + focus-visible ring)
+- 1 screenshot: `inicio-v2.6.png`
+
+### Issues/risks não resolvidos
+- Glosas: frontend ainda usa fetch-all (StatCards precisam de totais de todas as glosas)
+- Sem testes automatizados (Playwright/Vitest)
+- Lazy load dos componentes pesados não implementado
+- Dev server às vezes cai entre sessões — usar `setsid bun run dev` ou `nohup` para persistência
+
+### Prioridades recomendadas para próxima rodada
+1. **Modal de detalhes** do fluxo de caixa com gráfico de barras por janela
+2. **Lazy load** dos componentes pesados do Início (extrair para arquivos separados + next/dynamic)
+3. **Workflow de glosas com prazos configuráveis** por convênio
+4. **Modo de impressão** dedicado pra Contas a Pagar e DRE
+5. **PWA**: service worker para uso offline
+6. **Testes** automatizados com Playwright
+7. **Performance**: code-splitting das tabs do Financeiro (cada sub-tab carrega só quando clicada)
+8. **Dark mode**: testar shimmer animation no dark mode (pode precisar de ajuste de cores)

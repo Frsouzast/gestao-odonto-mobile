@@ -873,7 +873,7 @@ function DashboardPanel() {
           </span>
         </div>
         {q.isLoading ? (
-          <Skeleton className="m-4 h-64 bg-[var(--bg-app-alt-strong)] rounded-md" />
+          <Skeleton className="m-4 h-64 shimmer rounded-md" />
         ) : !q.data || q.data.receitaPorOrigem.length === 0 ? (
           <EmptyState
             icon={<LayoutGrid size={22} strokeWidth={1.5} />}
@@ -4003,7 +4003,7 @@ function RentabilidadePanel() {
             </span>
           </div>
           {rentQ.isLoading ? (
-            <Skeleton className="m-4 h-64 bg-[var(--bg-app-alt-strong)] rounded-md" />
+            <Skeleton className="m-4 h-64 shimmer rounded-md" />
           ) : chartData.length === 0 ? (
             <EmptyState
               icon={<TrendingUp size={22} strokeWidth={1.5} />}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { apiFetch, useAuth } from "@/lib/auth-store";
 import { brl, pct, hoje, mesAtual, dataBR, nomeMes } from "@/lib/utils";
 import {
@@ -242,7 +243,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
             {agendamentosQ.isLoading ? (
               <div className="p-4 space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full bg-[var(--bg-app-alt-strong)]" />
+                  <Skeleton key={i} className="h-12 w-full shimmer" />
                 ))}
               </div>
             ) : agendamentosQ.data && agendamentosQ.data.length > 0 ? (
@@ -300,8 +301,8 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
             <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4">
               {custosQ.isLoading ? (
                 <div className="space-y-2">
-                  <Skeleton className="h-16 w-full bg-[var(--bg-app-alt-strong)]" />
-                  <Skeleton className="h-4 w-2/3 bg-[var(--bg-app-alt-strong)]" />
+                  <Skeleton className="h-16 w-full shimmer" />
+                  <Skeleton className="h-4 w-2/3 shimmer" />
                 </div>
               ) : custosQ.data ? (
                 <div className="space-y-2">
@@ -356,7 +357,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
             />
             <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4">
               {procedimentosQ.isLoading ? (
-                <Skeleton className="h-16 w-full bg-[var(--bg-app-alt-strong)]" />
+                <Skeleton className="h-16 w-full shimmer" />
               ) : procedimentosQ.data ? (
                 <div>
                   <div className="flex items-baseline gap-2 mb-2">
@@ -432,7 +433,7 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
           {historicoQ.isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-24 w-full bg-[var(--bg-app-alt-strong)] rounded-xl" />
+                <Skeleton key={i} className="h-24 w-full shimmer rounded-xl" />
               ))}
             </div>
           ) : historicoQ.data && historicoQ.data.length > 0 ? (
@@ -670,7 +671,7 @@ function KpiCard({
         <Icon size={13} className="text-[var(--text-app-faint)]" />
       </div>
       {loading ? (
-        <Skeleton className="h-6 w-20 bg-[var(--bg-app-alt-strong)]" />
+        <Skeleton className="h-6 w-20 shimmer" />
       ) : (
         <div className={`text-lg sm:text-xl font-mono tabular-nums font-semibold ${colorClass}`}>
           {brl(value ?? 0)}
@@ -859,7 +860,7 @@ function StatusAgendamentosCard() {
   if (q.isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Skeleton className="h-32 w-32 rounded-full bg-[var(--bg-app-alt-strong)]" />
+        <Skeleton className="h-32 w-32 rounded-full shimmer" />
       </div>
     );
   }
@@ -968,7 +969,7 @@ function TimelineAgendamentosCard() {
     return (
       <div className="space-y-2">
         {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-6 w-full bg-[var(--bg-app-alt-strong)] rounded" />
+          <Skeleton key={i} className="h-6 w-full shimmer rounded" />
         ))}
       </div>
     );
@@ -1118,12 +1119,13 @@ function SaudeProcedimentosCard() {
     queryFn: () => apiFetch(`/api/procedimentos/health-check`),
     retry: 0,
   });
+  const [filtro, setFiltro] = useState<"todos" | "abaixoEquilibrio" | "abaixoSugerido" | "semPreco">("todos");
 
   if (q.isLoading) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-20 w-full bg-[var(--bg-app-alt-strong)] rounded-xl" />
+          <Skeleton key={i} className="h-20 w-full shimmer rounded-xl" />
         ))}
       </div>
     );
@@ -1157,70 +1159,127 @@ function SaudeProcedimentosCard() {
 
   const saudaveis = data.total - data.abaixoEquilibrio - data.abaixoSugerido - data.semPreco;
 
+  // Filtra procedimentos conforme o filtro selecionado
+  const procedimentosFiltrados = data.procedimentos.filter((p) => {
+    if (filtro === "abaixoEquilibrio") return p.abaixoEquilibrio;
+    if (filtro === "abaixoSugerido") return p.abaixoSugerido;
+    if (filtro === "semPreco") return p.semPreco;
+    return false; // "todos" não mostra lista
+  });
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <HealthStat
-          label="Saudáveis"
-          value={saudaveis}
-          total={data.total}
-          cor="text-[var(--accent-app-text)]"
-          bg="bg-[var(--accent-app-soft-bg)]"
-          icon={CheckCircle2}
-        />
-        <HealthStat
-          label="Abaixo do sugerido"
-          value={data.abaixoSugerido}
-          total={data.total}
-          cor="text-[var(--warning-app)]"
-          bg="bg-[var(--warning-app-bg)]"
-          icon={TrendingDown}
-        />
-        <HealthStat
-          label="Abaixo do equilíbrio"
-          value={data.abaixoEquilibrio}
-          total={data.total}
-          cor="text-[var(--danger-app)]"
-          bg="bg-[var(--danger-app-bg)]"
-          icon={AlertTriangle}
-        />
-        <HealthStat
-          label="Sem preço"
-          value={data.semPreco}
-          total={data.total}
-          cor="text-[var(--text-app-muted)]"
-          bg="bg-[var(--bg-app-alt-strong)]"
-          icon={Clock}
-        />
+        <button onClick={() => setFiltro(filtro === "todos" ? "todos" : "todos")} className="text-left">
+          <HealthStat
+            label="Saudáveis"
+            value={saudaveis}
+            total={data.total}
+            cor="text-[var(--accent-app-text)]"
+            bg="bg-[var(--accent-app-soft-bg)]"
+            icon={CheckCircle2}
+          />
+        </button>
+        <button onClick={() => setFiltro(filtro === "abaixoSugerido" ? "todos" : "abaixoSugerido")} className="text-left">
+          <HealthStat
+            label="Abaixo do sugerido"
+            value={data.abaixoSugerido}
+            total={data.total}
+            cor="text-[var(--warning-app)]"
+            bg={`${filtro === "abaixoSugerido" ? "ring-2 ring-[var(--warning-app)] " : ""}bg-[var(--warning-app-bg)]`}
+            icon={TrendingDown}
+          />
+        </button>
+        <button onClick={() => setFiltro(filtro === "abaixoEquilibrio" ? "todos" : "abaixoEquilibrio")} className="text-left">
+          <HealthStat
+            label="Abaixo do equilíbrio"
+            value={data.abaixoEquilibrio}
+            total={data.total}
+            cor="text-[var(--danger-app)]"
+            bg={`${filtro === "abaixoEquilibrio" ? "ring-2 ring-[var(--danger-app)] " : ""}bg-[var(--danger-app-bg)]`}
+            icon={AlertTriangle}
+          />
+        </button>
+        <button onClick={() => setFiltro(filtro === "semPreco" ? "todos" : "semPreco")} className="text-left">
+          <HealthStat
+            label="Sem preço"
+            value={data.semPreco}
+            total={data.total}
+            cor="text-[var(--text-app-muted)]"
+            bg={`${filtro === "semPreco" ? "ring-2 ring-[var(--text-app-muted)] " : ""}bg-[var(--bg-app-alt-strong)]`}
+            icon={Clock}
+          />
+        </button>
       </div>
 
-      {/* Lista de procedimentos abaixo do equilíbrio (top 3) */}
-      {data.abaixoEquilibrio > 0 && (
+      {/* Lista filtrada de procedimentos com problema */}
+      {filtro !== "todos" && procedimentosFiltrados.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className={`border rounded-lg p-3 max-h-64 overflow-y-auto scroll-thin ${
+            filtro === "abaixoEquilibrio"
+              ? "bg-[var(--danger-app-bg)] border-[var(--danger-app-border)]"
+              : filtro === "abaixoSugerido"
+              ? "bg-[var(--warning-app-bg)] border-[var(--warning-app-border)]"
+              : "bg-[var(--bg-app)] border-[var(--border-app)]"
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h5 className={`text-xs font-semibold flex items-center gap-1.5 ${
+              filtro === "abaixoEquilibrio" ? "text-[var(--danger-app)]"
+              : filtro === "abaixoSugerido" ? "text-[var(--warning-app)]"
+              : "text-[var(--text-app-muted)]"
+            }`}>
+              {filtro === "abaixoEquilibrio" ? <AlertTriangle size={13} /> : null}
+              {filtro === "abaixoEquilibrio" ? "Abaixo do equilíbrio" : filtro === "abaixoSugerido" ? "Abaixo do sugerido" : "Sem preço definido"}
+            </h5>
+            <button
+              onClick={() => setFiltro("todos")}
+              className="text-[10px] text-[var(--text-app-muted)] hover:text-[var(--text-app)]"
+            >
+              ✕ fechar
+            </button>
+          </div>
+          <ul className="space-y-1.5">
+            {procedimentosFiltrados.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-[var(--text-app)] truncate">{p.nome}</span>
+                <span className="font-mono tabular-nums shrink-0">
+                  {filtro === "semPreco" ? (
+                    <span className="text-[var(--text-app-faint)]">— sem preço —</span>
+                  ) : (
+                    <>
+                      <span className={filtro === "abaixoEquilibrio" ? "text-[var(--danger-app)]" : "text-[var(--warning-app)]"}>
+                        {brl(p.precoFinal)}
+                      </span>
+                      <span className="text-[var(--text-app-faint)] mx-1">vs</span>
+                      <span className="text-[var(--text-app-secondary)]">
+                        {brl(filtro === "abaixoEquilibrio" ? p.pontoEquilibrio : p.precoSugerido)}
+                      </span>
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </motion.div>
+      )}
+
+      {/* Banner vermelho permanente se houver abaixo do equilíbrio E filtro não está ativo */}
+      {filtro === "todos" && data.abaixoEquilibrio > 0 && (
         <div className="bg-[var(--danger-app-bg)] border border-[var(--danger-app-border)] rounded-lg p-3">
           <h5 className="text-xs font-semibold text-[var(--danger-app)] mb-2 flex items-center gap-1.5">
             <AlertTriangle size={13} />
-            Procedimentos abaixo do ponto de equilíbrio
+            {data.abaixoEquilibrio} procedimento(s) abaixo do ponto de equilíbrio
           </h5>
-          <ul className="space-y-1.5">
-            {data.procedimentos
-              .filter((p) => p.abaixoEquilibrio)
-              .slice(0, 3)
-              .map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-[var(--text-app)] truncate">{p.nome}</span>
-                  <span className="font-mono tabular-nums shrink-0">
-                    <span className="text-[var(--danger-app)]">{brl(p.precoFinal)}</span>
-                    <span className="text-[var(--text-app-faint)] mx-1">vs</span>
-                    <span className="text-[var(--text-app-secondary)]">{brl(p.pontoEquilibrio)}</span>
-                  </span>
-                </li>
-              ))}
-          </ul>
-          {data.abaixoEquilibrio > 3 && (
-            <p className="text-[11px] text-[var(--text-app-muted)] mt-2">
-              +{data.abaixoEquilibrio - 3} outro(s) — ver na aba Procedimentos
-            </p>
-          )}
+          <button
+            onClick={() => setFiltro("abaixoEquilibrio")}
+            className="text-[11px] text-[var(--danger-app)] hover:underline font-medium"
+          >
+            Ver lista completa →
+          </button>
         </div>
       )}
     </div>
@@ -1296,7 +1355,7 @@ function FluxoCaixaProjetadoCard() {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-32 w-full bg-[var(--bg-app-alt-strong)] rounded-xl" />
+          <Skeleton key={i} className="h-32 w-full shimmer rounded-xl" />
         ))}
       </div>
     );

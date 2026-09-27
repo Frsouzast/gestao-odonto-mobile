@@ -249,3 +249,32 @@
 .scroll-thin::-webkit-scrollbar-thumb:hover {
   background: var(--text-app-faint);
 }
+
+/* Shimmer skeleton animation — substitui o `animate-pulse` do shadcn default
+   por um efeito de "shimmer" mais elegante (gradient que desliza). */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-app-alt-strong) 25%,
+    var(--border-app-subtle) 50%,
+    var(--bg-app-alt-strong) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
+/* Smooth focus ring pra todos os inputs/buttons focusable */
+*:focus-visible {
+  outline: 2px solid var(--accent-app);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Disable focus ring on mouse click, keep on keyboard */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
