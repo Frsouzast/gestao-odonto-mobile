@@ -39,6 +39,7 @@ import { InicioTab } from "@/components/tabs/inicio-tab";
 import { UsuariosTab } from "@/components/tabs/usuarios-tab";
 import { CommandPalette } from "./command-palette";
 import { ConfigClinicaDialog } from "./config-clinica-dialog";
+import { PWAInstallPrompt } from "./pwa-install-prompt";
 import { dispararNovoItem } from "@/lib/atalhos";
 
 type Papel = "dono" | "financeiro" | "recepcao";
@@ -153,6 +154,7 @@ export function AppShell() {
             <button
               onClick={() => setPaletteOpen(true)}
               title="Busca global (Ctrl+K)"
+              aria-label="Busca global (Ctrl+K)"
               className="group hidden sm:flex items-center gap-2 h-9 px-2.5 rounded-md text-[var(--text-app-faint)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] transition-colors text-xs"
             >
               <Search size={14} />
@@ -166,6 +168,7 @@ export function AppShell() {
               size="sm"
               onClick={() => setPaletteOpen(true)}
               title="Busca global (Ctrl+K)"
+              aria-label="Busca global (Ctrl+K)"
               className="sm:hidden text-[var(--text-app-muted)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)] h-9 w-9 p-0"
             >
               <Search size={16} />
@@ -177,6 +180,7 @@ export function AppShell() {
               className="text-[var(--text-app-muted)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)] h-9 w-9 p-0"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               title="Alternar tema claro/escuro"
+              aria-label="Alternar tema claro/escuro"
             >
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span
@@ -198,6 +202,7 @@ export function AppShell() {
                   size="sm"
                   className="text-[var(--text-app-muted)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)] h-9 w-9 p-0"
                   title="Cor de destaque"
+                  aria-label="Cor de destaque"
                 >
                   <span
                     className="w-3.5 h-3.5 rounded-full ring-1 ring-[var(--border-app-strong)] shadow-inner"
@@ -295,10 +300,11 @@ export function AppShell() {
                 key={a.id}
                 onClick={() => setAba(a.id)}
                 title={a.atalho ? `${a.label} (Ctrl+${a.atalho})` : a.label}
-                className={`group relative flex items-center gap-1.5 text-xs sm:text-sm font-medium px-3 sm:px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap ${
+                aria-label={a.label}
+                className={`group relative flex items-center gap-1.5 text-xs sm:text-sm font-medium px-3 sm:px-4 py-2.5 border-b-2 transition-all whitespace-nowrap ${
                   ativa
                     ? "border-[var(--accent-app)] text-[var(--accent-app-text)]"
-                    : "border-transparent text-[var(--text-app-muted)] hover:text-[var(--text-app)]"
+                    : "border-transparent text-[var(--text-app-muted)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app)]/50"
                 }`}
               >
                 <Icon
@@ -390,6 +396,9 @@ export function AppShell() {
           }
         }}
       />
+
+      {/* PWA Install Prompt */}
+      <PWAInstallPrompt />
     </div>
   );
 }

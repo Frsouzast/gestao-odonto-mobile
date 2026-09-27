@@ -1574,3 +1574,84 @@ Task: Code-splitting Financeiro sub-tabs + dark mode shimmer + AnimatePresence t
 6. **Performance**: lazy load dos componentes pesados do Início (extrair donut, sparkline, timeline para arquivos separados)
 7. **Dark mode**: testar todos os componentes no tema escuro (pode haver ajustes pontuais)
 8. **Acessibilidade**: adicionar aria-labels em ícones-only buttons
+
+---
+Task ID: T13 (cron rodada 9 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: PWA manifest + install prompt + aria-labels + nav tab polish
+
+## Avaliação do status atual (início da rodada)
+- T12 (rodada anterior) deixou projeto em v2.2 estável com 27 features
+- QA inicial via agent-browser: sem bugs de runtime identificados
+- Prioridades sugeridas: modal fluxo caixa, glosas prazos, PWA, testes, lazy load
+- Esta rodada implementei: PWA manifest + install prompt + aria-labels + nav polish
+
+## Work Log
+
+### FUNCIONALIDADE 1: PWA — manifest + meta tags + install prompt
+- **`public/manifest.json`**: criado com name, short_name, description, start_url="/", display="standalone", theme_color="#0f766e", background_color="#fafaf9", lang="pt-BR", icons apontando para `/icon.svg`
+- **`public/icon.svg`**: criado ícone SVG 512x512 — fundo teal (#0f766e) com rounded corners (rx=96) + lâmpada branca (símbolo de ideia/insight)
+- **`src/app/layout.tsx`**: adicionado `manifest: "/manifest.json"`, `icons: { icon, apple }`, `appleWebApp: { capable, statusBarStyle, title }`, `viewport: { themeColor, width, initialScale, maximumScale }`
+- **`src/components/app/pwa-install-prompt.tsx`**: criado componente que:
+  - Escuta `beforeinstallprompt` event
+  - Mostra banner flutuante no canto inferior direito após 3s de delay (não intrusivo)
+  - Banner com gradient teal icon + "Instalar app" + "Adicione à tela inicial para acesso rápido" + botão "Instalar agora"
+  - Botão "✕ fechar" que dismissa e salva em sessionStorage (não mostra de novo na sessão)
+  - Animação framer-motion (fade + slide + scale)
+  - Se aceito, chama `deferredPrompt.prompt()` e esconde banner
+- Integrado no `app-shell.tsx` — renderiza `<PWAInstallPrompt />` no final do JSX
+- QA: verifiquei que `document.querySelector('link[rel=manifest]')?.href` retorna `http://localhost:3000/manifest.json` ✓
+
+### FUNCIONALIDADE 2: Acessibilidade — aria-labels em icon-only buttons
+- Adicionados `aria-label` em 4 icon-only buttons do header:
+  - Busca global (desktop + mobile) → `aria-label="Busca global (Ctrl+K)"`
+  - Toggle tema → `aria-label="Alternar tema claro/escuro"`
+  - Cor de destaque → `aria-label="Cor de destaque"`
+- Adicionados `aria-label` em 6 nav tabs (Início, Custos, Procedimentos, Agenda, Financeiro, Usuários)
+- Total: 9 elementos com aria-label — screen readers agora conseguem identificar todos os botões
+- QA: `Array.from(document.querySelectorAll('button[aria-label]')).map(b => b.getAttribute('aria-label'))` retornou os 9 labels ✓
+
+### STYLING: Nav tab polish
+- Nav tabs: trocado `transition-colors` por `transition-all` + adicionado `hover:bg-[var(--bg-app)]/50` (subtle background no hover)
+- Efeito: tabs não ativas agora têm um feedback visual suave ao passar o mouse (texto + background), criando uma sensação mais tátil
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **29 features totais** (acumuladas de T5–T13):
+  - 6 abas, atalhos Ctrl+1..6 + Ctrl+K + n
+  - Dashboard Início com 9 seções + health-check com filtro interativo
+  - 26 tooltips, paginação em 2 tabelas, agenda Dia/Semana/Mês + PDF
+  - Workflow de glosas com prazos + banner + badges
+  - Exportação CSV + Imprimir em 3 painéis
+  - Financeiro com lazy render + AnimatePresence transitions
+  - Shimmer skeletons com dark mode ajustado + focus-visible ring global
+  - **PWA**: manifest + icon + install prompt + meta tags (theme-color, apple-web-app)
+  - **Acessibilidade**: 9 aria-labels em icon-only buttons + nav tabs
+  - Styling refinado: hero grid pattern, cards hover lift + gradient shimmer, nav tab hover bg
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados
+
+### Modificações concluídas
+- **Novos arquivos**: `public/manifest.json`, `public/icon.svg`, `src/components/app/pwa-install-prompt.tsx`
+- **Arquivos modificados**:
+  - `src/app/layout.tsx` (manifest + viewport + icons + appleWebApp meta)
+  - `src/components/app/app-shell.tsx` (PWAInstallPrompt + aria-labels + nav tab hover bg)
+- 1 screenshot: `inicio-v2.7.png`
+
+### Issues/risks não resolvidos
+- Glosas: frontend ainda usa fetch-all
+- Sem testes automatizados (Playwright/Vitest)
+- Service worker não implementado (PWA é "installable" mas sem offline cache)
+- Lazy load dos componentes pesados do Início não implementado
+
+### Prioridades recomendadas para próxima rodada
+1. **Service worker** para cache offline (PWA completo)
+2. **Modal de detalhes** do fluxo de caixa com gráfico
+3. **Workflow de glosas com prazos configuráveis** por convênio
+4. **Modo de impressão** dedicado pra Contas a Pagar e DRE
+5. **Testes** automatizados com Playwright
+6. **Lazy load** dos componentes pesados do Início (extrair donut, sparkline, timeline)
+7. **Acessibilidade adicional**: skip-to-content link, role="main" no content area
+8. **Dark mode**: testar todos os componentes no tema escuro
