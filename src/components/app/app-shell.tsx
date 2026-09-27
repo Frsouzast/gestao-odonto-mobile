@@ -25,6 +25,8 @@ import {
   LayoutDashboard,
   Wallet,
   UserCog,
+  Search,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { CORES_DISPONIVEIS, setCorDestaque } from "./theme-applier";
@@ -35,6 +37,8 @@ import { AgendaTab } from "@/components/tabs/agenda-tab";
 import { FinanceiroTab } from "@/components/tabs/financeiro-tab";
 import { InicioTab } from "@/components/tabs/inicio-tab";
 import { UsuariosTab } from "@/components/tabs/usuarios-tab";
+import { CommandPalette } from "./command-palette";
+import { ConfigClinicaDialog } from "./config-clinica-dialog";
 
 type Papel = "dono" | "financeiro" | "recepcao";
 type AbaId =
@@ -64,11 +68,15 @@ const ABAS: Aba[] = [
 
 export function AppShell() {
   const usuario = useAuth((s) => s.usuario);
+  const setSessao = useAuth((s) => s.setSessao);
   const limpar = useAuth((s) => s.limpar);
+  const podeEditar = useAuth((s) => s.podeEditar());
   const { theme, setTheme } = useTheme();
   const [aba, setAba] = useState<AbaId>("inicio");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
 
-  // Atalhos de teclado: Ctrl+1..6 troca de aba
+  // Atalhos de teclado: Ctrl+1..6 troca de aba; Ctrl+K abre palette
   const irParaAba = useCallback((id: AbaId) => {
     setAba(id);
   }, []);
@@ -77,9 +85,14 @@ export function AppShell() {
     function onKeyDown(e: KeyboardEvent) {
       // Não interfere se estiver digitando em input/textarea/select
       const t = e.target as HTMLElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
+      const emInput = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      // Ctrl+K abre palette mesmo dentro de inputs (MAS o Electron/React KeyDown não cancela default de search)
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setPaletteOpen((p) => !p);
         return;
       }
+      if (emInput) return;
       if ((e.ctrlKey || e.metaKey) && /^[1-6]$/.test(e.key)) {
         e.preventDefault();
         const alvo = ABAS.find((a) => a.atalho === e.key);
@@ -126,6 +139,28 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-1">
+            {/* Botão de busca / Command Palette (Ctrl+K) */}
+            <button
+              onClick={() => setPaletteOpen(true)}
+              title="Busca global (Ctrl+K)"
+              className="group hidden sm:flex items-center gap-2 h-9 px-2.5 rounded-md text-[var(--text-app-faint)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] transition-colors text-xs"
+            >
+              <Search size={14} />
+              <span>Buscar…</span>
+              <kbd className="ml-1 inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] rounded">
+                ⌘K
+              </kbd>
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPaletteOpen(true)}
+              title="Busca global (Ctrl+K)"
+              className="sm:hidden text-[var(--text-app-muted)] hover:text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)] h-9 w-9 p-0"
+            >
+              <Search size={16} />
+            </Button>
+
             <Button
               variant="ghost"
               size="sm"
@@ -208,6 +243,23 @@ export function AppShell() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-[var(--border-app)]" />
+                {podeEditar && (
+                  <DropdownMenuItem
+                    onClick={() => setConfigOpen(true)}
+                    className="text-[var(--text-app-secondary)] hover:bg-[var(--bg-app-alt-strong)] cursor-pointer"
+                  >
+                    <Settings size={14} className="mr-2" />
+                    Configurações da clínica
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => setPaletteOpen(true)}
+                  className="text-[var(--text-app-secondary)] hover:bg-[var(--bg-app-alt-strong)] cursor-pointer sm:hidden"
+                >
+                  <Search size={14} className="mr-2" />
+                  Buscar (Ctrl+K)
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-[var(--border-app)] sm:hidden" />
                 <DropdownMenuItem
                   onClick={() => {
                     limpar();
@@ -281,6 +333,12 @@ export function AppShell() {
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1">
             <kbd className="px-1 py-0.5 rounded bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] font-mono">Ctrl</kbd>
+            <kbd className="px-1 py-0.5 rounded bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] font-mono">K</kbd>
+            <span>buscar</span>
+          </span>
+          <span className="text-[var(--text-app-faint)]">·</span>
+          <span className="flex items-center gap-1">
+            <kbd className="px-1 py-0.5 rounded bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] font-mono">Ctrl</kbd>
             <kbd className="px-1 py-0.5 rounded bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] font-mono">1–6</kbd>
             <span>trocar de aba</span>
           </span>
@@ -288,9 +346,35 @@ export function AppShell() {
           <span>{abaInfo?.label}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[var(--text-app-faint)]">Gestão Odonto-Radiológica · v2.0</span>
+          <span className="text-[var(--text-app-faint)]">Gestão Odonto-Radiológica · v2.1</span>
         </div>
       </footer>
+
+      {/* Command Palette (Ctrl+K) */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onNavegar={irParaAba}
+      />
+
+      {/* Configurações da clínica */}
+      <ConfigClinicaDialog
+        open={configOpen}
+        onOpenChange={setConfigOpen}
+        onClinicaAtualizada={(nomeAtualizado) => {
+          // Atualiza o nome da clínica no store de sessão sem deslogar
+          if (usuario) {
+            setSessao(
+              // token atual precisa ser pego do store — usa getState()
+              useAuth.getState().token || "",
+              {
+                ...usuario,
+                clinica: { ...usuario.clinica, nome: nomeAtualizado },
+              }
+            );
+          }
+        }}
+      />
     </div>
   );
 }

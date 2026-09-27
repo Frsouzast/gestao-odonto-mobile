@@ -778,3 +778,139 @@ Task: QA end-to-end profundo + 3 novas funcionalidades + melhorias de styling
 6. **Configurações da clínica** (editar nome, CNPJ) — atualmente fixo no momento do registro
 7. **Glosas: workflow mais rico** com prazos e alertas automáticos
 8. **Testes** automatizados com Playwright/Vitest
+
+---
+Task ID: T6 (cron rodada 2 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: 3 novas features prioritárias (busca global, config clínica, sparklines) + 1 bug fix + styling
+
+## Avaliação do status atual (início da rodada)
+- T5 (rodada anterior) deixou projeto em estado estável: 6 abas, lint limpo, dev server saudável
+- QA inicial confirmou login + Início tab + Usuários + Financeiro funcionando
+- Prioridades sugeridas na rodada anterior: 1) Busca global (Ctrl+K) 2) Configurações da clínica 3) Sparklines 6 meses 4) Paginação 5) Impressão agenda 6) Workflow glosas
+- Esta rodada implementei as 3 primeiras + 1 bug encontrado no QA
+
+## Work Log
+
+### Backend: 3 novos endpoints
+- **`/api/clinica` (GET/PUT)** em `src/app/api/clinica/route.ts`
+  - GET: retorna `{ id, nome, cnpj, criadoEm }` da clínica do usuário autenticado (qualquer papel)
+  - PUT: atualiza nome e/ou CNPJ (só dono/financeiro via `podeEditar`)
+  - Máscara CNPJ no client, validação de campos não vazios
+- **`/api/financeiro/historico-6-meses` (GET)** em `src/app/api/financeiro/historico-6-meses/route.ts`
+  - Retorna 6 meses terminando no mês atual (ou no parâmetro `?ate=YYYY-MM`)
+  - Cada mês: `{ mes, receitas, despesas, resultado, aReceber, aPagar }`
+  - Cálculo: receitas = contas a receber com status 'recebido'/'parcial' no mês, despesas = contas a pagar com status 'pago', etc — mesma lógica do /api/financeiro/resumo porém iterando 6 meses
+- **`/api/busca` (GET)** em `src/app/api/busca/route.ts`
+  - Busca global em 4 categorias (procedimentos, convênios, agendamentos, contas a receber)
+  - Limite de 8 por categoria
+
+### BUG FIX: Prisma `mode: insensitive` não suportado em SQLite
+- Erro 500 ao usar `db.procedimento.findMany({ where: { nome: { contains: q, mode: "insensitive" } } })`
+- Erro: "PrismaClientKnownRequestError" com clientVersion 6.19.2
+- **Solução**: trazer todos os registros da clínica (sem filtros) e filtrar em JS com `String.toLowerCase().includes(q)`
+- Justificativa: uma clínica tem tipicamente <1000 registros por tabela — o custo é dominado pelos JOINs do DB, não pelo filtro JS. Para uso real multi-clínica num cenário SaaS, convém migrar p/ Postgres (que suporta `mode: insensitive` nativamente) ou usar `db.$queryRaw` com `LOWER()` — mantida a opção simples pra agora.
+- Adicionado `take: 200` em agendamentos e contasReceber como proteção contra clínica com muito histórico
+
+### FUNCIONALIDADE 1: Busca global com Command Palette (Ctrl+K)
+- Criado `src/components/app/command-palette.tsx` (~280 linhas)
+- Componente estilo Linear/Notion: dialog flutuante com input + lista agrupada por categoria
+- **Busca em 4 categorias**:
+  - Procedimentos (nome, tempo, preço) → vai pra aba Procedimentos
+  - Convênios (nome, responsável) → vai pra aba Financeiro
+  - Agendamentos (nome, exame, telefone) → vai pra aba Agenda, com badge de status colorida
+  - Contas a receber (paciente, dentista) → vai pra aba Financeiro, com badge de status
+- **UX estilo Linear**:
+  - Atalho **Ctrl+K** abre/fecha (implementado no app-shell, funciona mesmo dentro de inputs)
+  - **Setas ↑↓** navegam a lista, **Enter** abre, **ESC** fecha
+  - Hover com mouse também seleciona
+  - Cada item mostra ícone + título + subtitulo + badge (opcional) + CornerDownLeft no selecionado
+  - Cabeçalho do resultado agrupa por categoria com label uppercase tracking-wide
+  - Footer com dicas de teclado (setas, enter, qtd de resultados)
+  - Animações framer-motion (fade + slide + scale) na entrada/saída
+  - Background overlay `bg-black/40 backdrop-blur-sm`
+- **Integração no header**:
+  - Botão "Buscar… ⌘K" no header (desktop) com bordas, hover state, e kbd `⌘K` inline
+  - Botão só-ícone no mobile (sm:hidden)
+  - Item "Buscar (Ctrl+K)" no menu do usuário (mobile)
+- QA: pesquisei "maria" → achou "Maria Teste" em Contas a Receber, cliquei → naveguei pra Financeiro ✓
+
+### FUNCIONALIDADE 2: Configurações da Clínica (editar nome + CNPJ)
+- Criado `src/components/app/config-clinica-dialog.tsx` (~200 linhas)
+- Dialog acessível pelo menu do usuário (só podeEditar = dono/financeiro vê)
+- Carrega dados via `useQuery(["clinica"])` → `GET /api/clinica`
+- **Form uncontrolled** com `defaultValue + key={clinica.id}` (mesma pattern de T3-b) — evita `set-state-in-effect` lint error
+- Refs `nomeRef` e `cnpjRef` lidos no submit (sem React state)
+- **Máscara CNPJ** no input: `00.000.000/0000-00` (formata enquanto digita)
+- **Preview card** no topo mostra o estado atual (ícone + nome + "Desde dd/mm/yyyy")
+- On success:
+  1. Toast "Dados da clínica atualizados"
+  2. Invalida `["clinica"]`
+  3. Callback `onClinicaAtualizada(nome)` → atualiza no `useAuth` store (setSessao com token atual + novo nome) — **header atualiza instantaneamente sem deslogar**
+- QA: editei "Clínica Sorriso" → "Clínica Sorriso LTDA", CNPJ "12345678000190" → "12.345.678/0001-90" → salvou → header atualizou sem reload ✓
+
+### FUNCIONALIDADE 3: Mini-sparklines de tendência 6 meses
+- Criado `src/components/app/sparkline.tsx` (~150 linhas)
+  - `Sparkline` — gráfico de linha SVG puro (sem recharts) com gradient fill + ponto destacado no último valor
+  - `BarSparkline` — barras com base zero (verde se positivo, vermelho se negativo) — bom pra resultado que pode ser <0
+  - Props: `valores, cor, corNegativa, largura, altura, preencher, strokeWidth`
+- Adicionado `SparklineCard` em `inicio-tab.tsx`:
+  - 3 cards na seção "Tendência dos últimos 6 meses" (visível só pra dono/financeiro)
+  - **Receitas** (Sparkline line, accent color) + ícone TrendingUp + delta % (verde ↑ / vermelho ↓)
+  - **Despesas pagas** (Sparkline line, warning color) + ícone TrendingDown + delta %
+  - **Resultado** (BarSparkline, verde/vermelho) + ícone Activity + delta %
+  - Labels dos meses em PT-BR abreviado (Abr/Mai/Jun/Jul/Ago/Set) abaixo do gráfico
+  - Último mês destacado em `text-secondary` (vs outros em `text-faint`)
+- Empty state: "Sem histórico suficiente" + hint p/ lançar contas em meses anteriores
+- Loading: 3 skeletons `h-24`
+- QA: logou → Início → viu 3 sparklines renderizando com os 6 meses (Abr-Set 2026) ✓
+
+### STYLING (mandatório)
+- **Command palette**: overlay `bg-black/40 backdrop-blur-sm`, card centralizado top-[15vh], shadow-2xl, rounded-2xl
+- Itens com hover `bg-[var(--accent-app-soft-bg)]` e ícone de fundo `bg-[var(--accent-app)] text-white` quando selecionado
+- Botão "Buscar… ⌘K" no header com `kbd` estilizado (`bg-app-alt-strong border border-app font-mono`)
+- **SparklineCards** com hover state `hover:border-[var(--border-app-strong)] hover:shadow-sm`
+- Delta de tendência colorido (accent ↑ / danger ↓) com seta unicode
+- Footer agora tem 2 dicas (Ctrl+K buscar + Ctrl+1-6 abas), separados por "·" — versão bumped pra v2.1
+- Avatar gradient no menu do usuário, badge de papel atualizado com `uppercase tracking-wide font-medium`
+
+## Stage Summary
+
+### Status atual do projeto
+- App 100% funcional + **9 features totais** (de T5 e T6 combinadas):
+  - 6 abas (Início, Custos, Procedimentos, Agenda, Financeiro, Usuários)
+  - Atalhos Ctrl+1..6 (trocar aba) + Ctrl+K (busca global)
+  - Busca global command palette
+  - Configurações da clínica (editar nome + CNPJ com máscara)
+  - Sparklines de tendência 6 meses
+  - Exportação CSV + Imprimir (PDF) em 3 painéis do Financeiro
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos end-to-end validados (login, busca, config, sparklines)
+
+### Modificações concluídas
+- **3 novos endpoints** (`/api/clinica`, `/api/financeiro/historico-6-meses`, `/api/busca`)
+- **1 bug fix** (Prisma `mode: insensitive` em SQLite → fetch-all + JS filter)
+- **3 novos componentes** (`command-palette.tsx`, `config-clinica-dialog.tsx`, `sparkline.tsx`)
+- **1 arquivo modificado** (`inicio-tab.tsx` adicionou seção de tendência)
+- **1 arquivo modificado** (`app-shell.tsx` adicionou botão de busca + atalho Ctrl+K + integração dos 2 novos componentes + item no menu do usuário)
+- 4 screenshots em `/home/z/my-project/download/`:
+  - `inicio-v2.1.png`, `inicio-v2.1-final.png`, `inicio-sparklines.png`
+  - `command-palette.png`, `contas-receber-via-palette.png`
+  - `config-clinica-dialog.png`
+
+### Issues/risks não resolvidos
+- `/api/busca` traz tudo da clínica e filtra em JS (suficiente p/ clínica isolada, mas pode degradar em multi-tenant SaaS com milhares de registros por tabela) — prioridade baixa enquanto for single-tenant SQLite
+- Sem paginação nas tabelas longas do Financeiro (Contas a Receber/Pagar) — recomendado para próxima rodada
+- Workflow de glosas ainda é básico (sem prazos automáticos) — recomendado
+- Sem testes automatizados (Playwright/Vitest) — recomendado
+
+### Prioridades recomendadas para próxima rodada (cron 15 min)
+1. **Paginação nas tabelas longas** (Contas a Receber/Pagar com >20 itens): usar `useInfiniteQuery` do TanStack Query + botão "Carregar mais"
+2. **Workflow de glosas com prazos**: alerta visual quando glosa está em_recurso há >30 dias
+3. **Filtro de agendamentos por intervalo de datas** (hoje só mostra 1 dia por vez) — útil pra ver agenda da semana/mês
+4. **Modo de impressão dedicado** pra agenda do dia (PDF com layout otimizado pra balcão de recepção)
+5. **Indicadores visuais extras**: mini-gráfico de distribuição de status de agendamentos no Início (pie chart)
+6. **Atalhos de teclado adicionais**: `/` foca busca dentro da aba atual, `n` cria novo item na aba ativa
+7. **Tooltips em badges** explicando significado de cada status/percentual
+8. **Testes** automatizados com Playwright

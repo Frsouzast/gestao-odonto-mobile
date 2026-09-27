@@ -11,6 +11,7 @@ import {
 import { motion } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Sparkline, BarSparkline } from "@/components/app/sparkline";
 
 type AbaId = "inicio" | "custos" | "procedimentos" | "agenda" | "financeiro" | "usuarios";
 
@@ -30,6 +31,15 @@ interface ResumoCustos {
   horasEfetivas: number;
   custoFixoPorHora: number;
   custoFixoPorMinuto: number;
+}
+
+interface MesHistorico {
+  mes: string; // "YYYY-MM"
+  receitas: number;
+  despesas: number;
+  resultado: number;
+  aReceber: number;
+  aPagar: number;
 }
 
 interface Agendamento {
@@ -77,6 +87,13 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
   const procedimentosQ = useQuery<Procedimento[]>({
     queryKey: ["procedimentos"],
     queryFn: () => apiFetch(`/api/procedimentos`),
+    retry: 0,
+  });
+
+  // Histórico 6 meses — para sparklines
+  const historicoQ = useQuery<MesHistorico[]>({
+    queryKey: ["financeiro", "historico-6-meses"],
+    queryFn: () => apiFetch(`/api/financeiro/historico-6-meses`),
     retry: 0,
   });
 
@@ -351,6 +368,73 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
         </section>
       </div>
 
+      {/* Tendência 6 meses — Sparklines */}
+      {podeEditar && (
+        <section>
+          <SectionHeader
+            icon={TrendingUp}
+            title="Tendência dos últimos 6 meses"
+            subtitle={historicoQ.data ? `${historicoQ.data.length} meses` : undefined}
+            action={
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavegar("financeiro")}
+                className="text-[var(--accent-app-text)] hover:bg-[var(--accent-app-soft-bg)] text-xs"
+              >
+                Ver detalhes <ArrowRight size={14} className="ml-1" />
+              </Button>
+            }
+          />
+          {historicoQ.isLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-24 w-full bg-[var(--bg-app-alt-strong)] rounded-xl" />
+              ))}
+            </div>
+          ) : historicoQ.data && historicoQ.data.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <SparklineCard
+                label="Receitas"
+                valores={historicoQ.data.map((m) => m.receitas)}
+                labels={historicoQ.data.map((m) => nomeMes(m.mes))}
+                valorAtual={historicoQ.data[historicoQ.data.length - 1]?.receitas ?? 0}
+                cor="var(--accent-app)"
+                icone={TrendingUp}
+              />
+              <SparklineCard
+                label="Despesas pagas"
+                valores={historicoQ.data.map((m) => m.despesas)}
+                labels={historicoQ.data.map((m) => nomeMes(m.mes))}
+                valorAtual={historicoQ.data[historicoQ.data.length - 1]?.despesas ?? 0}
+                cor="var(--warning-app)"
+                icone={TrendingDown}
+              />
+              <SparklineCard
+                label="Resultado"
+                valores={historicoQ.data.map((m) => m.resultado)}
+                labels={historicoQ.data.map((m) => nomeMes(m.mes))}
+                valorAtual={historicoQ.data[historicoQ.data.length - 1]?.resultado ?? 0}
+                cor="var(--accent-app)"
+                corNegativa="var(--danger-app)"
+                icone={Activity}
+                barras
+              />
+            </div>
+          ) : (
+            <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-6 text-center">
+              <TrendingUp className="mx-auto mb-2 text-[var(--text-app-faint)]" size={24} />
+              <p className="text-sm text-[var(--text-app-muted)]">
+                Sem histórico suficiente para mostrar tendência.
+              </p>
+              <p className="text-[11px] text-[var(--text-app-faint)] mt-1">
+                Lance contas a receber/pagar nos meses anteriores para começar a ver o histórico.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Atalhos rápidos */}
       <section>
         <SectionHeader icon={Activity} title="Atalhos rápidos" />
@@ -525,4 +609,95 @@ function usarSaudacao() {
   if (hora < 12) return "Bom dia";
   if (hora < 18) return "Boa tarde";
   return "Boa noite";
+}
+
+function SparklineCard({
+  label,
+  valores,
+  labels,
+  valorAtual,
+  cor,
+  corNegativa,
+  icone: Icon,
+  barras = false,
+}: {
+  label: string;
+  valores: number[];
+  labels: string[];
+  valorAtual: number;
+  cor: string;
+  corNegativa?: string;
+  icone: LucideIcon;
+  barras?: boolean;
+}) {
+  // Tendência: comparar último vs penúltimo
+  const n = valores.length;
+  const atual = valores[n - 1] ?? 0;
+  const anterior = valores[n - 2] ?? 0;
+  const delta = atual - anterior;
+  const pctDelta = anterior !== 0 ? delta / Math.abs(anterior) : 0;
+  const isPositive = delta >= 0;
+  const tendenciaCor =
+    barras ? (atual >= 0 ? "var(--accent-app-text)" : "var(--danger-app)")
+    : isPositive ? "var(--accent-app-text)" : "var(--danger-app)";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4 hover:border-[var(--border-app-strong)] hover:shadow-sm transition-all"
+    >
+      <div className="flex items-start justify-between mb-2">
+        <div>
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <Icon size={12} className="text-[var(--text-app-faint)]" />
+            <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-faint)] font-medium">
+              {label}
+            </span>
+          </div>
+          <div className="text-xl font-mono tabular-nums font-semibold text-[var(--text-app)]">
+            {brl(valorAtual)}
+          </div>
+        </div>
+        {n >= 2 && (
+          <div className={`text-[11px] font-mono tabular-nums ${tendenciaCor}`}>
+            {isPositive ? "↑" : "↓"} {pct(Math.abs(pctDelta))}
+          </div>
+        )}
+      </div>
+      <div className="mt-1">
+        {barras ? (
+          <BarSparkline
+            valores={valores}
+            cor={cor}
+            corNegativa={corNegativa || "var(--danger-app)"}
+            largura={280}
+            altura={40}
+          />
+        ) : (
+          <Sparkline
+            valores={valores}
+            cor={cor}
+            largura={280}
+            altura={40}
+          />
+        )}
+      </div>
+      {/* Labels dos meses */}
+      <div className="flex justify-between mt-1 px-px">
+        {labels.map((l, i) => (
+          <span
+            key={i}
+            className={`text-[9px] ${
+              i === labels.length - 1
+                ? "text-[var(--text-app-secondary)] font-medium"
+                : "text-[var(--text-app-faint)]"
+            }`}
+          >
+            {l.split(" ")[0].slice(0, 3)}
+          </span>
+        ))}
+      </div>
+    </motion.div>
+  );
 }
