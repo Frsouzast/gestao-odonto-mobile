@@ -324,7 +324,15 @@ export function AppShell() {
         </nav>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-hidden bg-[var(--bg-app)] relative">
+      {/* Skip-to-content link for keyboard users — hidden until focused */}
+      <a
+        href="#conteudo-principal"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:rounded-md focus:bg-[var(--accent-app)] focus:text-white focus:text-sm focus:shadow-lg"
+      >
+        Pular para o conteúdo
+      </a>
+
+      <main id="conteudo-principal" className="flex-1 min-h-0 overflow-hidden bg-[var(--bg-app)] relative">
         <AnimatePresence mode="wait">
           <motion.div
             key={abaEfetiva}
@@ -342,7 +350,7 @@ export function AppShell() {
             {abaEfetiva === "usuarios" && <UsuariosTab />}
           </motion.div>
         </AnimatePresence>
-      </div>
+      </main>
 
       {/* Footer com atalhos de teclado - discreto */}
       <footer className="hidden md:flex items-center justify-between gap-4 px-4 sm:px-6 py-1.5 bg-[var(--surface-app)] border-t border-[var(--border-app-subtle)] text-[10px] text-[var(--text-app-faint)]">

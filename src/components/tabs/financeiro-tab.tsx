@@ -470,18 +470,27 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-      <div className="w-12 h-12 rounded-full bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)] grid place-items-center mb-3">
-        {icon}
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="flex flex-col items-center justify-center py-12 px-4 text-center"
+    >
+      <div className="relative mb-4">
+        {/* Decorative ring around icon */}
+        <div className="absolute inset-0 rounded-full bg-[var(--accent-app)]/5 scale-150 blur-sm" />
+        <div className="relative w-14 h-14 rounded-full bg-gradient-to-br from-[var(--bg-app-alt-strong)] to-[var(--border-app-subtle)] text-[var(--text-app-muted)] grid place-items-center border border-[var(--border-app)]">
+          {icon}
+        </div>
       </div>
-      <div className="text-sm font-medium text-[var(--text-app)]">{title}</div>
+      <div className="text-sm font-semibold text-[var(--text-app)]">{title}</div>
       {hint && (
-        <div className="text-xs text-[var(--text-app-muted)] mt-1 max-w-sm">
+        <div className="text-xs text-[var(--text-app-muted)] mt-1.5 max-w-sm leading-relaxed">
           {hint}
         </div>
       )}
-      {action && <div className="mt-4">{action}</div>}
-    </div>
+      {action && <div className="mt-5">{action}</div>}
+    </motion.div>
   );
 }
 
@@ -493,14 +502,20 @@ function ErrorState({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-8 px-4 text-center gap-3">
-      <AlertTriangle
-        size={28}
-        className="text-[var(--danger-app)]"
-        strokeWidth={1.5}
-      />
-      <div className="text-sm text-[var(--text-app)]">Erro ao carregar</div>
-      <div className="text-xs text-[var(--text-app-muted)] max-w-md">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="flex flex-col items-center justify-center py-10 px-4 text-center gap-3"
+    >
+      <div className="relative">
+        <div className="absolute inset-0 rounded-full bg-[var(--danger-app)]/5 scale-150 blur-sm" />
+        <div className="relative w-12 h-12 rounded-full bg-[var(--danger-app-bg)] text-[var(--danger-app)] grid place-items-center border border-[var(--danger-app-border)]">
+          <AlertTriangle size={22} strokeWidth={1.5} />
+        </div>
+      </div>
+      <div className="text-sm font-semibold text-[var(--text-app)]">Erro ao carregar</div>
+      <div className="text-xs text-[var(--text-app-muted)] max-w-md leading-relaxed">
         {message}
       </div>
       <Button
@@ -512,7 +527,7 @@ function ErrorState({
       >
         <RefreshCw size={13} /> Tentar novamente
       </Button>
-    </div>
+    </motion.div>
   );
 }
 

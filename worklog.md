@@ -1655,3 +1655,95 @@ Task: PWA manifest + install prompt + aria-labels + nav tab polish
 6. **Lazy load** dos componentes pesados do Início (extrair donut, sparkline, timeline)
 7. **Acessibilidade adicional**: skip-to-content link, role="main" no content area
 8. **Dark mode**: testar todos os componentes no tema escuro
+
+---
+Task ID: T14 (cron rodada 10 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: Skip-to-content + landmark roles + dark mode QA + empty/error states polish
+
+## Avaliação do status atual (início da rodada)
+- T13 (rodada anterior) deixou projeto em v2.2 estável com 29 features
+- QA inicial via agent-browser: sem bugs de runtime identificados
+- Prioridades sugeridas: service worker, modal fluxo caixa, glosas prazos, skip-to-content, dark mode
+- Esta rodada implementei: skip-to-content + role="main" + dark mode QA + empty/error states polish
+
+## Work Log
+
+### FUNCIONALIDADE 1: Acessibilidade — skip-to-content + landmark roles
+- **Skip-to-content link**: `<a href="#conteudo-principal">Pular para o conteúdo</a>` no `app-shell.tsx`
+  - `sr-only` (hidden visualmente, acessível a screen readers)
+  - `focus:not-sr-only` + `focus:fixed focus:top-2 focus:left-2 focus:z-50` — aparece fixo no canto superior esquerdo quando focado via Tab
+  - Estilo accent background + white text quando visível
+- **`<main id="conteudo-principal">`**: trocado `<div>` por `<main>` no content area
+  - Garante landmark role `main` automaticamente (HTML5 semantic)
+  - ID para anchor link do skip-to-content
+- **`<header>`, `<nav>`, `<footer>`**: já existiam (mantidos de rodadas anteriores)
+- QA: `document.querySelector('a[href="#conteudo-principal"]')?.textContent` retornou "Pular para o conteúdo" ✓
+- QA: `document.querySelector('main#conteudo-principal')` retornou elemento ✓
+
+### FUNCIONALIDADE 2: Dark mode QA — validação completa
+- Toggle via `document.documentElement.classList.add('dark')` + navegação por todas as 6 abas (Ctrl+1..6)
+- Nenhum erro de runtime encontrado
+- Shimmer skeletons ajustados (dark mode override de T12 funcionando)
+- Cores das vars `*-app` definidas para ambos os modos em globals.css
+- Screenshot: `dark-mode-full-qa.png` (todas as abas em dark mode)
+- Status: **dark mode funciona corretamente em todas as abas**
+
+### STYLING: Empty states mais expressivos
+- **EmptyState** (`financeiro-tab.tsx`): refatorado para:
+  - `<motion.div>` com entrance animation (opacity+y 8→0, 250ms)
+  - Ícone em círculo maior (w-14 h-14 vs w-12 h-12 antes)
+  - Gradient background no ícone (`from-[var(--bg-app-alt-strong)] to-[var(--border-app-subtle)]`)
+  - Borda `border-[var(--border-app)]` no círculo
+  - Decorative ring: `absolute inset-0 rounded-full bg-[var(--accent-app)]/5 scale-150 blur-sm` atrás do ícone
+  - Título `font-semibold` (era `font-medium`)
+  - Hint com `leading-relaxed` para melhor legibilidade
+  - Mais padding vertical (`py-12` vs `py-10`)
+- **ErrorState** (`financeiro-tab.tsx`): mesmo tratamento:
+  - `<motion.div>` entrance animation
+  - Ícone em círculo com danger colors (`danger-app-bg` + `danger-app-border`)
+  - Decorative ring com `bg-[var(--danger-app)]/5`
+  - Título `font-semibold`
+  - Mensagem com `leading-relaxed`
+  - Mais padding (`py-10` vs `py-8`)
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **31 features totais** (acumuladas de T5–T14):
+  - 6 abas, atalhos Ctrl+1..6 + Ctrl+K + n
+  - Dashboard Início com 9 seções + health-check com filtro interativo
+  - 26 tooltips, paginação em 2 tabelas, agenda Dia/Semana/Mês + PDF
+  - Workflow de glosas com prazos + banner + badges
+  - Exportação CSV + Imprimir em 3 painéis
+  - Financeiro com lazy render + AnimatePresence transitions
+  - Shimmer skeletons com dark mode ajustado + focus-visible ring global
+  - PWA: manifest + icon + install prompt + meta tags
+  - **Acessibilidade completa**: 9 aria-labels + skip-to-content + role="main" + landmark roles
+  - **Dark mode**: testado em todas as abas, sem issues
+  - **Empty/error states polidos**: gradient icons + decorative rings + animations
+  - Styling: hero grid pattern, cards hover lift + gradient shimmer, nav tab hover bg
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados (incluindo dark mode em todas as abas)
+
+### Modificações concluídas
+- **Arquivo modificado**: `src/components/app/app-shell.tsx` (skip-to-content link + `<main>` element)
+- **Arquivo modificado**: `src/components/tabs/financeiro-tab.tsx` (EmptyState + ErrorState polish)
+- 2 screenshots: `dark-mode-full-qa.png`, `empty-states-polish.png`
+
+### Issues/risks não resolvidos
+- Glosas: frontend ainda usa fetch-all
+- Sem testes automatizados (Playwright/Vitest)
+- Service worker não implementado (PWA é "installable" mas sem offline cache)
+- Lazy load dos componentes pesados do Início não implementado
+
+### Prioridades recomendadas para próxima rodada
+1. **Service worker** para cache offline (PWA completo)
+2. **Modal de detalhes** do fluxo de caixa com gráfico
+3. **Workflow de glosas com prazos configuráveis** por convênio
+4. **Modo de impressão** dedicado pra Contas a Pagar e DRE
+5. **Testes** automatizados com Playwright
+6. **Lazy load** dos componentes pesados do Início (extrair donut, sparkline, timeline)
+7. **Empty states polidos** nas outras abas (Agenda, Procedimentos, Custos — aplicar mesma pattern do Financeiro)
+8. **Tooltips em botões de ação** (receber, cancelar, excluir — explicar o que cada botão faz)
