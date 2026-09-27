@@ -1495,3 +1495,82 @@ Task: Health-check filter interativo + shimmer skeletons + focus-visible ring + 
 6. **Testes** automatizados com Playwright
 7. **Performance**: code-splitting das tabs do Financeiro (cada sub-tab carrega só quando clicada)
 8. **Dark mode**: testar shimmer animation no dark mode (pode precisar de ajuste de cores)
+
+---
+Task ID: T12 (cron rodada 8 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: Code-splitting Financeiro sub-tabs + dark mode shimmer + AnimatePresence transitions
+
+## Avaliação do status atual (início da rodada)
+- T11 (rodada anterior) deixou projeto em v2.2 estável com 25 features
+- QA inicial via agent-browser: sem bugs de runtime identificados
+- Prioridades sugeridas: modal fluxo caixa, lazy load, glosas prazos, PWA, testes
+- Esta rodada implementei: lazy render das 9 sub-tabs do Financeiro + dark mode shimmer adjustment
+
+## Work Log
+
+### FUNCIONALIDADE 1: Lazy render das 9 sub-tabs do Financeiro
+- **Problema**: o `financeiro-tab.tsx` (~5000 linhas) montava todos os 9 painéis (Dashboard, ContasReceber, ContasPagar, Convênios, Glosas, DRE, Rentabilidade, Lotes, Conciliação) simultaneamente, mesmo os que estavam escondidos. Isso causava:
+  - Múltiplas queries TanStack disparando em paralelo ao abrir a aba Financeiro
+  - Lento mount inicial da aba
+  - Hooks rodando em painéis não visíveis
+- **Solução**: trocado `<Tabs defaultValue="dashboard">` por `<Tabs value={subTab} onValueChange={setSubTab}>` com state controlado
+  - Removidos 9 `<TabsContent>` (que mantinham todos os painéis montados)
+  - Substituídos por renderização condicional: `{subTab === "dashboard" && <DashboardPanel />}`
+  - Apenas o painel ativo é montado; ao trocar de sub-tab, o anterior desmonta
+  - Adicionado `<AnimatePresence mode="wait">` + `<motion.div key={subTab}>` com transição opacity+y 4→0→-4 (150ms ease-out) entre sub-tabs
+  - Removido import não usado de `TabsContent`
+- **Impacto**: ao abrir Financeiro, só Dashboard faz queries; clicar em "Contas a receber" monta apenas aquele painel; clicar de volta em "Dashboard" desmonta ContasReceber e remonta Dashboard. Reduz drasticamente o número de queries paralelas.
+- QA: testei ciclos Dashboard → Contas a Receber → DRE → Dashboard, todos renderizando corretamente ✓
+
+### STYLING: Dark mode shimmer adjustment
+- **Problema**: o `.shimmer` em light mode usava `var(--border-app-subtle)` (#f5f5f4, quase branco) como cor do meio — visível contra o `var(--bg-app-alt-strong)` (#e7e5e4, cinza claro). Em dark mode, `--border-app-subtle` é `#3f3a37` (mais escuro que `--bg-app-alt-strong` `#44403c`), resultando em shimmer quase invisível.
+- **Solução**:
+  - Light mode: trocado `--border-app-subtle` por `--border-app-strong` (#d6d3d1) — contraste melhor
+  - Dark mode: adicionado `.dark .shimmer` override usando `var(--text-app-faint)` (#78716c) como cor do meio — cinza mais claro contra o `#44403c`, criando contraste visível
+- QA: testei dark mode via `document.documentElement.classList.toggle('dark')` + screenshot ✓
+
+### STYLING: AnimatePresence transitions entre sub-tabs
+- Adicionado `import { motion, AnimatePresence } from "framer-motion"` (antes só `motion`)
+- `<AnimatePresence mode="wait">` garante que o painel antigo desmonte antes do novo montar
+- Transição: `initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}` com `duration: 0.15, ease: "easeOut"`
+- Cria uma transição suave e rápida entre sub-tabs do Financeiro
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **27 features totais** (acumuladas de T5–T12):
+  - 6 abas, atalhos Ctrl+1..6 + Ctrl+K + n
+  - Dashboard Início com 9 seções + health-check com filtro interativo
+  - 26 tooltips, paginação em 2 tabelas, agenda Dia/Semana/Mês + PDF
+  - Workflow de glosas com prazos + banner + badges
+  - Exportação CSV + Imprimir em 3 painéis
+  - **Financeiro com lazy render** (só 1 sub-tab montada por vez) + **AnimatePresence transitions**
+  - **Shimmer skeletons** com dark mode ajustado (12 componentes)
+  - Focus-visible ring global
+  - Styling refinado: hero grid pattern, cards hover lift + gradient shimmer
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos validados (incluindo sub-tab switching)
+
+### Modificações concluídas
+- **Arquivos modificados**:
+  - `src/components/tabs/financeiro-tab.tsx` (lazy render + AnimatePresence + removed TabsContent import)
+  - `src/app/globals.css` (dark mode shimmer override + light mode shimmer adjusted)
+- 1 screenshot: `financeiro-dark-mode.png`
+
+### Issues/risks não resolvidos
+- Glosas: frontend ainda usa fetch-all (StatCards precisam de totais)
+- Sem testes automatizados (Playwright/Vitest)
+- PWA / service worker não implementado
+- Dev server às vezes cai entre sessões
+
+### Prioridades recomendadas para próxima rodada
+1. **Modal de detalhes** do fluxo de caixa com gráfico de barras
+2. **Workflow de glosas com prazos configuráveis** por convênio
+3. **PWA**: manifest + service worker para uso offline
+4. **Modo de impressão** dedicado pra Contas a Pagar e DRE
+5. **Testes** automatizados com Playwright
+6. **Performance**: lazy load dos componentes pesados do Início (extrair donut, sparkline, timeline para arquivos separados)
+7. **Dark mode**: testar todos os componentes no tema escuro (pode haver ajustes pontuais)
+8. **Acessibilidade**: adicionar aria-labels em ícones-only buttons

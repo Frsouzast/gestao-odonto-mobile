@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Wallet,
   LayoutGrid,
@@ -58,7 +58,6 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
-  TabsContent,
 } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -683,6 +682,7 @@ function ChartTooltipBox({
 // ---------------------------------------------------------------------------
 export function FinanceiroTab() {
   const podeEditar = useAuth((s) => s.podeEditar());
+  const [subTab, setSubTab] = useState("dashboard");
 
   return (
     <div className="h-full overflow-y-auto scroll-thin p-4 sm:p-6 bg-[var(--bg-app)]">
@@ -692,7 +692,7 @@ export function FinanceiroTab() {
           <span className="text-sm font-medium">Financeiro</span>
         </div>
 
-        <Tabs defaultValue="dashboard">
+        <Tabs value={subTab} onValueChange={setSubTab}>
           <TabsList className="flex-wrap h-auto bg-[var(--surface-app)] border border-[var(--border-app)] p-1 gap-0.5">
             <TabsTrigger
               value="dashboard"
@@ -750,33 +750,27 @@ export function FinanceiroTab() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="dashboard" className="mt-4 space-y-4">
-            <DashboardPanel />
-          </TabsContent>
-          <TabsContent value="receber" className="mt-4 space-y-4">
-            <ContasReceberPanel podeEditar={podeEditar} />
-          </TabsContent>
-          <TabsContent value="pagar" className="mt-4 space-y-4">
-            <ContasPagarPanel podeEditar={podeEditar} />
-          </TabsContent>
-          <TabsContent value="convenios" className="mt-4 space-y-4">
-            <ConveniosPanel podeEditar={podeEditar} />
-          </TabsContent>
-          <TabsContent value="glosas" className="mt-4 space-y-4">
-            <GlosasPanel podeEditar={podeEditar} />
-          </TabsContent>
-          <TabsContent value="dre" className="mt-4 space-y-4">
-            <DREPanel />
-          </TabsContent>
-          <TabsContent value="rentabilidade" className="mt-4 space-y-4">
-            <RentabilidadePanel />
-          </TabsContent>
-          <TabsContent value="lotes" className="mt-4 space-y-4">
-            <LotesPanel podeEditar={podeEditar} />
-          </TabsContent>
-          <TabsContent value="conciliacao" className="mt-4 space-y-4">
-            <ConciliacaoPanel podeEditar={podeEditar} />
-          </TabsContent>
+          {/* Only render the active panel — avoids mounting all 9 sub-tabs at once */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={subTab}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="mt-4 space-y-4"
+            >
+              {subTab === "dashboard" && <DashboardPanel />}
+              {subTab === "receber" && <ContasReceberPanel podeEditar={podeEditar} />}
+              {subTab === "pagar" && <ContasPagarPanel podeEditar={podeEditar} />}
+              {subTab === "convenios" && <ConveniosPanel podeEditar={podeEditar} />}
+              {subTab === "glosas" && <GlosasPanel podeEditar={podeEditar} />}
+              {subTab === "dre" && <DREPanel />}
+              {subTab === "rentabilidade" && <RentabilidadePanel />}
+              {subTab === "lotes" && <LotesPanel podeEditar={podeEditar} />}
+              {subTab === "conciliacao" && <ConciliacaoPanel podeEditar={podeEditar} />}
+            </motion.div>
+          </AnimatePresence>
         </Tabs>
       </div>
     </div>

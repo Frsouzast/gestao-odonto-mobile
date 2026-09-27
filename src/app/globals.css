@@ -260,11 +260,21 @@
   background: linear-gradient(
     90deg,
     var(--bg-app-alt-strong) 25%,
-    var(--border-app-subtle) 50%,
+    var(--border-app-strong) 50%,
     var(--bg-app-alt-strong) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite linear;
+}
+/* Dark mode: use a lighter middle stop for better visibility */
+.dark .shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-app-alt-strong) 25%,
+    var(--text-app-faint) 50%,
+    var(--bg-app-alt-strong) 75%
+  );
+  background-size: 200% 100%;
 }
 
 /* Smooth focus ring pra todos os inputs/buttons focusable */
