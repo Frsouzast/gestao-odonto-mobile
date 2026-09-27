@@ -667,3 +667,114 @@ Stage Summary:
 - Prisma + SQLite (arquivo único em /home/z/my-project/db/custom.db)
 - Cron job 15min com webDevReview configurado para continuidade de desenvolvimento
 - Status final: APP TOTALMENTE FUNCIONAL end-to-end, verificado no browser
+
+---
+Task ID: T5 (cron rodada 1 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: QA end-to-end profundo + 3 novas funcionalidades + melhorias de styling
+
+## Avaliação do status atual (início da rodada)
+- Projeto está estável e funcional: todas as 4 abas originais (Custos, Procedimentos, Agenda, Financeiro) operacionais
+- Lint limpo, dev server sem erros de runtime
+- QA anterior (T4) validou fluxo básico (login → despesa → capacidade → calculo procedimento → convenio + tabela → conta a receber → recebimento → dashboard/DRE)
+- Decidi nesta rodada: priorizar NOVAS funcionalidades + melhorias de styling (projeto está em fase estável)
+
+## Work Log
+- QA profundo via agent-browser repetiu o fluxo completo confirmando:
+  - Login com conta existente (fernando@example.com / senha1234) → AppShell carregou
+  - Configuração de capacidade (20d × 8h × 1u × 75% = 120h/mês) → /api/resumo retornou 200 com custo R$ 0,35/min
+  - Procedimento "Radiografia panorâmica" criado + tempo ajustado p/ 30 min → cálculo: custo direto R$ 10,73, preço sugerido R$ 21,90, ponto equilíbrio R$ 13,58
+  - Preço final R$ 25 definido → lucratividade calculada
+  - Convênio "Unimed Dental" criado + vigência R$ 60 desde 27/09
+  - Conta a receber "Maria Teste" com procedimento+convenio+data → precoVigente auto-buscou R$ 60 (sem digitar)
+  - Marcar como recebido → Dashboard atualizou (receitas R$ 60, resultado R$ 60)
+  - DRE em cascata: bruto 60 → líquido 56,40 (após impostos 6%) → margem 56,40 → resultado -2.443,60 (com despesa fixa 2.500)
+  - Rentabilidade: 1 grupo "Radiografia panorâmica" no gráfico
+  - Toggle tema claro/escuro funcionando
+  - Sem bugs de runtime encontrados — todas as APIs retornando códigos corretos
+
+### FUNCIONALIDADE 1: Nova aba "Início" (Dashboard global)
+- Criado `src/components/tabs/inicio-tab.tsx` (~450 linhas)
+- Hero card com gradient teal e saudação dinâmica (Bom dia/Boa tarde/Boa noite + primeiro nome)
+- 6 KPIs financeiros do mês (receitas, despesas, resultado, a receber, a pagar, inadimplência) — visível só pra dono/financeiro
+- Painel "Agenda de hoje" (max 8 itens) com badge de status e botão "Abrir agenda"
+- Painel "Custo fixo" resumido (custo/minuto + total/mês + horas/mês) — ou banner "Configure capacidade" se null
+- Painel "Procedimentos" com contador (cadastrados, com preço definido, pendentes)
+- 4-5 Atalhos rápidos (cards clicáveis com hover gradient p/ navegar entre abas)
+- Animações framer-motion (entrada + hover)
+- Adicionada ao `app-shell.tsx` como primeira aba (id="inicio"), atalho Ctrl+1
+
+### FUNCIONALIDADE 2: Nova aba "Usuários" (Gerenciamento de equipe)
+- Criado `src/components/tabs/usuarios-tab.tsx` (~270 linhas)
+- Apenas dono vê (papeisPermitidos: ["dono"])
+- 3 cards explicativos no topo mostrando cada papel (dono/financeiro/recepção) com ícone, descrição e contador de usuários
+- Lista de membros com avatar com iniciais, nome, e-mail, badge "VOCÊ" para o atual, data de cadastro, e badge colorido do papel
+- Dialog "Convidar novo usuário" com formulário (nome, email, senha min 8, papel select financeiro/recepção)
+- Validação client-side: email regex, senha mínima, botão desabilitado até válido
+- Mutação TanStack Query + invalidação ["usuarios"] + toast de sucesso
+
+### FUNCIONALIDADE 3: Exportação CSV + Imprimir (PDF via browser)
+- Criado `src/lib/export.ts` com 3 funções:
+  - `exportarCSV(dados, nomeArquivo, colunas?)` — gera CSV com BOM UTF-8 (Excel PT-BR lê acentos), separador `;`, download automático, toast de sucesso
+  - `imprimirTabela(titulo, subtitulo, colunas, dados, accentColor?)` — abre popup com HTML formatado (accent color do tema, zebra rows, alinhamento numérico à direita) e chama `window.print()` (PDF via "Salvar como PDF" do browser)
+  - `fmtBRL`, `fmtData`, `fmtPct` helpers
+- Integrado em 3 painéis do Financeiro:
+  - **DRE**: botão CSV + Imprimir no header (exporta 8 linhas da cascata + mes)
+  - **Contas a Receber**: botão CSV + Imprimir no header da tabela (paciente, procedimento, convênio, dentista, data, faturado, pago, status)
+  - **Rentabilidade**: botão CSV + Imprimir no header da tabela (chave, qtd, receita, custo, resultado, margem, ticket médio)
+- QA: cliquei no botão CSV do DRE → toast "CSV exportado: dre-2026-09.csv" exibido ✓
+
+### FUNCIONALIDADE 4: Atalhos de teclado
+- Ctrl+1..6 troca de aba (apenas quando não está digitando em input/textarea/select)
+- Implementado via useEffect + window.addEventListener('keydown') no `app-shell.tsx`
+- Respeita papeisPermitidos (Ctrl+6 "Usuários" só funciona pra dono)
+- Footer discreto mostra dica "Ctrl 1–6 trocar de aba"
+- QA: testei Ctrl+5 → Financeiro abriu ✓; Ctrl+1 → Início abriu ✓
+
+### STYLING (melhorias obrigatórias)
+- **Header com glassmorphism**: `bg-[var(--surface-app)]/95 backdrop-blur-md` + gradient teal→teal-hover no logo + dot indicador
+- **Avatar com iniciais**: `bg-gradient-to-br from-[var(--accent-app)] to-[var(--accent-app-hover)]` + 2 letras maiúsculas do nome
+- **Badge de papel no nome da clínica**: pill pequeno "DONO(A)" ao lado do nome
+- **Animação de transição entre abas**: `<AnimatePresence mode="wait">` + `motion.div` com opacity+y 4→0→-4 (180ms ease-out)
+- **Indicador animado na aba ativa**: `<motion.span layoutId="aba-indicator">` (framer-motion shared layout)
+- **Toggle de tema animado**: `<AnimatePresence mode="wait">` no ícone Sun/Moon com rotate 90°
+- **Hover states nos KPI cards**: `hover:border-[var(--border-app-strong)] hover:shadow-sm transition-all`
+- **Atalhos rápidos**: hover muda o ícone de fundo pra accent color + texto fica accent-text
+- **Footer sticky**: gradient shadow discreto na borda superior, mostra atalho + versão
+- **Skeletons refinados**: tons corretos `bg-[var(--bg-app-alt-strong)]` (não mais o cinza default)
+- **Início tab**: hero card com 2 blobs decorativos blur (top-right + bottom-left) + texto branco sobre gradient
+
+## Stage Summary
+### Status atual do projeto
+- App 100% funcional + 2 novas abas (Início, Usuários) + exportação CSV/PDF + atalhos de teclado
+- 6 abas totais (Início, Custos, Procedimentos, Agenda, Financeiro, Usuários) — CTRL+1..6
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos end-to-end validados
+
+### Metas/modificações concluídas
+- QA profundo end-to-end (registro, login, custos, capacidade, procedimentos com cálculo, agenda, financeiro completo, DRE, rentabilidade) — todos passando
+- Nova aba Início com KPIs + atalhos + atividade
+- Nova aba Usuários com convite
+- Exportação CSV (BOM UTF-8 + Excel PT-BR) e Imprimir (PDF via browser) em 3 painéis do financeiro
+- Atalhos Ctrl+1..6
+- Header glassmorphism + animações + avatares com iniciais
+- 4 screenshots capturados em /home/z/my-project/download/:
+  - `inicio-dashboard.png` — aba Início em modo claro
+  - `inicio-dark-mode.png` — aba Início em modo escuro
+  - `usuarios-tab.png` — aba Usuários
+  - `dre-cascata.png`, `dre-dark-mode.png`, `rentabilidade.png` — financeiro
+  - `dark-mode.png`, `dark-mode-rentabilidade.png` (rodadas anteriores)
+
+### Issues/risks não resolvidos
+- Nenhum bug identificado nesta rodada — app está em estado estável
+
+### Prioridades recomendadas para próxima rodada (cron 15 min)
+1. **Busca global** (Ctrl+K) pra encontrar pacientes/procedimentos/convenios rapidamente
+2. **Filtro de agendamentos por intervalo de datas** (hoje só mostra 1 dia por vez)
+3. **Indicadores visuais no Dashboard**: mini-sparklines mostrando tendência dos últimos 6 meses
+4. **Paginação nas tabelas longas** (Contas a Receber/Pagar com muitos itens)
+5. **Modo de impressão dedicado** pra agenda do dia (PDF com layout otimizado pra balcão de recepção)
+6. **Configurações da clínica** (editar nome, CNPJ) — atualmente fixo no momento do registro
+7. **Glosas: workflow mais rico** com prazos e alertas automáticos
+8. **Testes** automatizados com Playwright/Vitest

@@ -29,6 +29,8 @@ import {
   Receipt,
   BadgeCheck,
   Clock,
+  Download,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -43,7 +45,8 @@ import {
 } from "recharts";
 
 import { apiFetch, useAuth } from "@/lib/auth-store";
-import { brl, pct, num, hoje, mesAtual, dataBR, cn } from "@/lib/utils";
+import { brl, pct, num, hoje, mesAtual, dataBR, cn, nomeMes } from "@/lib/utils";
+import { exportarCSV, imprimirTabela, fmtBRL, fmtPct } from "@/lib/export";
 import {
   Tabs,
   TabsList,
@@ -1004,13 +1007,65 @@ function ContasReceberPanel({ podeEditar }: { podeEditar: boolean }) {
       {/* Table */}
       <Card className={cardCls}>
         <div className="px-4 py-2 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-[var(--text-app)]">
-            Lançamentos do mês
-          </h3>
-          <span className="text-[11px] text-[var(--text-app-muted)]">
-            {(contasQ.data ?? []).length}{" "}
-            {(contasQ.data ?? []).length === 1 ? "item" : "itens"}
-          </span>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-[var(--text-app)]">
+              Lançamentos do mês
+            </h3>
+            <span className="text-[11px] text-[var(--text-app-muted)]">
+              {(contasQ.data ?? []).length}{" "}
+              {(contasQ.data ?? []).length === 1 ? "item" : "itens"}
+            </span>
+          </div>
+          {(contasQ.data ?? []).length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  exportarCSV(
+                    contasQ.data ?? [],
+                    `contas-receber-${mes}`,
+                    [
+                      { chave: "pacienteNome", label: "Paciente" },
+                      { chave: "procedimentoNome", label: "Procedimento" },
+                      { chave: "convenioNome", label: "Convênio" },
+                      { chave: "dentistaSolicitante", label: "Dentista" },
+                      { chave: "dataExame", label: "Data exame", format: (v) => dataBR(v as string) },
+                      { chave: "valorFaturado", label: "Faturado", format: (v) => fmtBRL(v) },
+                      { chave: "valorPago", label: "Pago", format: (v) => fmtBRL(v) },
+                      { chave: "status", label: "Status" },
+                    ]
+                  )
+                }
+                className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+              >
+                <Download size={12} className="mr-1" /> CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  imprimirTabela(
+                    "Contas a Receber",
+                    `${nomeMes(mes)} · ${contasQ.data?.length ?? 0} lançamento(s)`,
+                    [
+                      { label: "Paciente" },
+                      { label: "Procedimento" },
+                      { label: "Convênio" },
+                      { label: "Data", format: (r) => dataBR(r.dataExame as string) },
+                      { label: "Faturado", format: (r) => fmtBRL(r.valorFaturado as number) },
+                      { label: "Pago", format: (r) => fmtBRL(r.valorPago as number | null) },
+                      { label: "Status" },
+                    ],
+                    (contasQ.data ?? []) as unknown as Record<string, unknown>[]
+                  )
+                }
+                className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+              >
+                <Printer size={12} className="mr-1" /> Imprimir
+              </Button>
+            </div>
+          )}
         </div>
 
         {contasQ.isLoading ? (
@@ -3349,6 +3404,7 @@ function RecuperarGlosaButton({
 // 6. DRE
 // ---------------------------------------------------------------------------
 function DREPanel() {
+  const usuario = useAuth((s) => s.usuario);
   const [mes, setMes] = useState<string>(mesAtual());
 
   const q = useQuery<DRE>({
@@ -3410,9 +3466,58 @@ function DREPanel() {
               DRE gerencial
             </h3>
           </div>
-          <span className="text-[11px] text-[var(--text-app-muted)]">
-            visão cascata
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-[var(--text-app-muted)] hidden sm:inline">
+              visão cascata
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!q.data}
+              onClick={() => {
+                if (!q.data) return;
+                exportarCSV(
+                  [{ ...q.data, mes }],
+                  `dre-${mes}`,
+                  [
+                    { chave: "mes", label: "Mês" },
+                    { chave: "receitaBruta", label: "Receita bruta", format: (v) => fmtBRL(v) },
+                    { chave: "glosas", label: "Glosas", format: (v) => fmtBRL(v) },
+                    { chave: "impostos", label: "Impostos", format: (v) => fmtBRL(v) },
+                    { chave: "receitaLiquida", label: "Receita líquida", format: (v) => fmtBRL(v) },
+                    { chave: "custosVariaveis", label: "Custos variáveis", format: (v) => fmtBRL(v) },
+                    { chave: "margemContribuicao", label: "Margem de contribuição", format: (v) => fmtBRL(v) },
+                    { chave: "despesasFixas", label: "Despesas fixas", format: (v) => fmtBRL(v) },
+                    { chave: "resultadoOperacional", label: "Resultado operacional", format: (v) => fmtBRL(v) },
+                  ]
+                );
+              }}
+              className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+            >
+              <Download size={12} className="mr-1" /> CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!q.data}
+              onClick={() => {
+                if (!q.data) return;
+                imprimirTabela(
+                  "DRE Gerencial",
+                  `${nomeMes(mes)} · ${usuario?.clinica.nome ?? ""}`,
+                  [
+                    { label: "Linha" },
+                    { label: "Valor (R$)", format: (r) => fmtBRL(r.valor) },
+                  ],
+                  linhas.map((l) => ({ linha: l.label, valor: l.valor })),
+                  "var(--accent-app)"
+                );
+              }}
+              className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+            >
+              <Printer size={12} className="mr-1" /> Imprimir
+            </Button>
+          </div>
         </div>
 
         {q.isLoading ? (
@@ -3675,18 +3780,69 @@ function RentabilidadePanel() {
       {agrupar !== "equipamento" && (
         <Card className={cardCls}>
           <div className="px-4 py-2 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-[var(--text-app)]">
-              Rentabilidade por{" "}
-              {agrupar === "convenio"
-                ? "convênio"
-                : agrupar === "dentista"
-                ? "dentista"
-                : "exame"}
-            </h3>
-            <span className="text-[11px] text-[var(--text-app-muted)]">
-              {(rentQ.data ?? []).length}{" "}
-              {(rentQ.data ?? []).length === 1 ? "grupo" : "grupos"}
-            </span>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-[var(--text-app)]">
+                Rentabilidade por{" "}
+                {agrupar === "convenio"
+                  ? "convênio"
+                  : agrupar === "dentista"
+                  ? "dentista"
+                  : "exame"}
+              </h3>
+              <span className="text-[11px] text-[var(--text-app-muted)]">
+                {(rentQ.data ?? []).length}{" "}
+                {(rentQ.data ?? []).length === 1 ? "grupo" : "grupos"}
+              </span>
+            </div>
+            {(rentQ.data ?? []).length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    exportarCSV(
+                      rentQ.data ?? [],
+                      `rentabilidade-${agrupar}-${mes}`,
+                      [
+                        { chave: "chave", label: agrupar === "convenio" ? "Convênio" : agrupar === "dentista" ? "Dentista" : "Procedimento" },
+                        { chave: "quantidade", label: "Quantidade" },
+                        { chave: "receita", label: "Receita", format: (v) => fmtBRL(v) },
+                        { chave: "custo", label: "Custo", format: (v) => fmtBRL(v) },
+                        { chave: "resultado", label: "Resultado", format: (v) => fmtBRL(v) },
+                        { chave: "margem", label: "Margem", format: (v) => fmtPct(v) },
+                        { chave: "ticketMedio", label: "Ticket médio", format: (v) => fmtBRL(v) },
+                      ]
+                    )
+                  }
+                  className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+                >
+                  <Download size={12} className="mr-1" /> CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    imprimirTabela(
+                      `Rentabilidade por ${agrupar}`,
+                      `${nomeMes(mes)} · ${rentQ.data?.length ?? 0} grupo(s)`,
+                      [
+                        { label: agrupar === "convenio" ? "Convênio" : agrupar === "dentista" ? "Dentista" : "Procedimento" },
+                        { label: "Qtd", format: (r) => String(r.quantidade ?? 0) },
+                        { label: "Receita", format: (r) => fmtBRL(r.receita as number) },
+                        { label: "Custo", format: (r) => fmtBRL(r.custo as number) },
+                        { label: "Resultado", format: (r) => fmtBRL(r.resultado as number) },
+                        { label: "Margem", format: (r) => fmtPct(r.margem as number) },
+                        { label: "Ticket médio", format: (r) => fmtBRL(r.ticketMedio as number) },
+                      ],
+                      (rentQ.data ?? []) as unknown as Record<string, unknown>[]
+                    )
+                  }
+                  className="h-7 text-[11px] border-[var(--border-app)] text-[var(--text-app-muted)] hover:bg-[var(--bg-app-alt-strong)]"
+                >
+                  <Printer size={12} className="mr-1" /> Imprimir
+                </Button>
+              </div>
+            )}
           </div>
 
           {rentQ.isLoading ? (
