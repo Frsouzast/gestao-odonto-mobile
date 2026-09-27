@@ -1,0 +1,1860 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useMemo, useState } from "react";
+     4→     4→import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+     5→     5→import { motion } from "framer-motion";
+     6→     6→import {
+     7→     7→  Plus,
+     8→     8→  Trash2,
+     9→     9→  AlertTriangle,
+    10→    10→  RefreshCw,
+    11→    11→  Wallet,
+    12→    12→  Clock,
+    13→    13→  Timer,
+    14→    14→  Gauge,
+    15→    15→  Package,
+    16→    16→  Search,
+    17→    17→  Inbox,
+    18→    18→} from "lucide-react";
+    19→    19→import { toast } from "sonner";
+    20→    20→
+    21→    21→import { apiFetch, useAuth } from "@/lib/auth-store";
+    22→    22→import { brl, num } from "@/lib/utils";
+    23→    23→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+    24→    24→import { Card } from "@/components/ui/card";
+    25→    25→import { Button } from "@/components/ui/button";
+    26→    26→import { Input } from "@/components/ui/input";
+    27→    27→import { Label } from "@/components/ui/label";
+    28→    28→import { Skeleton } from "@/components/ui/skeleton";
+    29→    29→import {
+    30→    30→  Table,
+    31→    31→  TableHeader,
+    32→    32→  TableBody,
+    33→    33→  TableHead,
+    34→    34→  TableRow,
+    35→    35→  TableCell,
+    36→    36→  TableFooter,
+    37→    37→} from "@/components/ui/table";
+    38→    38→
+    39→    39→// ----------------------------------------------------------------------------
+    40→    40→// Types (mirror T2-b API contract)
+    41→    41→// ----------------------------------------------------------------------------
+    42→    42→interface Despesa {
+    43→    43→  id: string;
+    44→    44→  clinicaId: string;
+    45→    45→  nome: string;
+    46→    46→  valor: number;
+    47→    47→  ordem: number;
+    48→    48→}
+    49→    49→
+    50→    50→interface Capacidade {
+    51→    51→  clinicaId: string;
+    52→    52→  diasTrabalhados: number;
+    53→    53→  horasPorDia: number;
+    54→    54→  unidadesRenda: number;
+    55→    55→  percentOcupacao: number; // 0..1 decimal
+    56→    56→}
+    57→    57→
+    58→    58→interface Ativo {
+    59→    59→  id: string;
+    60→    60→  clinicaId: string;
+    61→    61→  nome: string;
+    62→    62→  dataAquisicao: string | null;
+    63→    63→  valorAquisicao: number;
+    64→    64→  vidaUtilAnos: number;
+    65→    65→}
+    66→    66→
+    67→    67→interface Insumo {
+    68→    68→  id: string;
+    69→    69→  clinicaId: string;
+    70→    70→  nome: string;
+    71→    71→  unidade: string;
+    72→    72→  valorTotal: number;
+    73→    73→  quantidade: number;
+    74→    74→}
+    75→    75→
+    76→    76→interface Resumo {
+    77→    77→  custoFixoTotal: number;
+    78→    78→  depreciacaoMensalTotal: number;
+    79→    79→  horasEfetivas: number;
+    80→    80→  custoFixoPorHora: number;
+    81→    81→  custoFixoPorMinuto: number;
+    82→    82→}
+    83→    83→
+    84→    84→// ----------------------------------------------------------------------------
+    85→    85→// Shared style helpers
+    86→    86→// ----------------------------------------------------------------------------
+    87→    87→const inputCls =
+    88→    88→  "bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app)] placeholder:text-[var(--text-app-faint)] focus-visible:border-[var(--accent-app)] focus-visible:ring-[var(--accent-app)]/25";
+    89→    89→
+    90→    90→const cellInputCls =
+    91→    91→  "h-8 px-2 py-0.5 bg-transparent border-b border-[var(--border-app-strong)] hover:border-[var(--accent-app)] focus-visible:border-[var(--accent-app)] focus-visible:ring-0 focus-visible:ring-transparent rounded-none";
+    92→    92→
+    93→    93→// ----------------------------------------------------------------------------
+    94→    94→// Small UI primitives
+    95→    95→// ----------------------------------------------------------------------------
+    96→    96→function StatCard({
+    97→    97→  label,
+    98→    98→  value,
+    99→    99→  sub,
+   100→   100→  icon,
+   101→   101→  accent,
+   102→   102→}: {
+   103→   103→  label: string;
+   104→   104→  value: string;
+   105→   105→  sub?: string;
+   106→   106→  icon: React.ReactNode;
+   107→   107→  accent?: boolean;
+   108→   108→}) {
+   109→   109→  return (
+   110→   110→    <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   111→   111→      <div className="px-4 py-3 flex items-start gap-3">
+   112→   112→        <div
+   113→   113→          className={`w-8 h-8 rounded-lg grid place-items-center shrink-0 ${
+   114→   114→            accent
+   115→   115→              ? "bg-[var(--accent-app-soft-bg)] text-[var(--accent-app-text)]"
+   116→   116→              : "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)]"
+   117→   117→          }`}
+   118→   118→        >
+   119→   119→          {icon}
+   120→   120→        </div>
+   121→   121→        <div className="min-w-0 flex-1">
+   122→   122→          <div className="text-[11px] uppercase tracking-wide text-[var(--text-app-muted)] truncate">
+   123→   123→            {label}
+   124→   124→          </div>
+   125→   125→          <div
+   126→   126→            className={`text-xl font-mono tabular-nums ${
+   127→   127→              accent ? "text-[var(--accent-app-text)]" : "text-[var(--text-app)]"
+   128→   128→            }`}
+   129→   129→          >
+   130→   130→            {value}
+   131→   131→          </div>
+   132→   132→          {sub && (
+   133→   133→            <div className="text-[11px] text-[var(--text-app-muted)] mt-0.5 truncate">
+   134→   134→              {sub}
+   135→   135→            </div>
+   136→   136→          )}
+   137→   137→        </div>
+   138→   138→      </div>
+   139→   139→    </Card>
+   140→   140→  );
+   141→   141→}
+   142→   142→
+   143→   143→function EmptyState({
+   144→   144→  icon,
+   145→   145→  title,
+   146→   146→  hint,
+   147→   147→}: {
+   148→   148→  icon: React.ReactNode;
+   149→   149→  title: string;
+   150→   150→  hint?: string;
+   151→   151→}) {
+   152→   152→  return (
+   153→   153→    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+   154→   154→      <div className="w-12 h-12 rounded-full bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)] grid place-items-center mb-3">
+   155→   155→        {icon}
+   156→   156→      </div>
+   157→   157→      <div className="text-sm font-medium text-[var(--text-app)]">{title}</div>
+   158→   158→      {hint && (
+   159→   159→        <div className="text-xs text-[var(--text-app-muted)] mt-1 max-w-sm">
+   160→   160→          {hint}
+   161→   161→        </div>
+   162→   162→      )}
+   163→   163→    </div>
+   164→   164→  );
+   165→   165→}
+   166→   166→
+   167→   167→function ErrorState({
+   168→   168→  message,
+   169→   169→  onRetry,
+   170→   170→}: {
+   171→   171→  message: string;
+   172→   172→  onRetry: () => void;
+   173→   173→}) {
+   174→   174→  return (
+   175→   175→    <div className="flex flex-col items-center justify-center py-8 px-4 text-center gap-3">
+   176→   176→      <AlertTriangle
+   177→   177→        size={28}
+   178→   178→        className="text-[var(--danger-app)]"
+   179→   179→        strokeWidth={1.5}
+   180→   180→      />
+   181→   181→      <div className="text-sm text-[var(--text-app)]">Erro ao carregar</div>
+   182→   182→      <div className="text-xs text-[var(--text-app-muted)] max-w-md">
+   183→   183→        {message}
+   184→   184→      </div>
+   185→   185→      <Button
+   186→   186→        type="button"
+   187→   187→        variant="outline"
+   188→   188→        size="sm"
+   189→   189→        onClick={onRetry}
+   190→   190→        className="bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)]"
+   191→   191→      >
+   192→   192→        <RefreshCw size={13} /> Tentar novamente
+   193→   193→      </Button>
+   194→   194→    </div>
+   195→   195→  );
+   196→   196→}
+   197→   197→
+   198→   198→function TableSkeleton({ cols }: { cols: number }) {
+   199→   199→  return (
+   200→   200→    <div className="px-4 py-3 space-y-2">
+   201→   201→      {Array.from({ length: 3 }).map((_, i) => (
+   202→   202→        <div key={i} className="flex gap-3">
+   203→   203→          {Array.from({ length: cols }).map((__, j) => (
+   204→   204→            <Skeleton
+   205→   205→              key={j}
+   206→   206→              className="h-7 flex-1 bg-[var(--bg-app-alt-strong)]"
+   207→   207→            />
+   208→   208→          ))}
+   209→   209→        </div>
+   210→   210→      ))}
+   211→   211→    </div>
+   212→   212→  );
+   213→   213→}
+   214→   214→
+   215→   215→// ----------------------------------------------------------------------------
+   216→   216→// 1. Despesas fixas
+   217→   217→// ----------------------------------------------------------------------------
+   218→   218→function DespesasPanel() {
+   219→   219→  const podeEditar = useAuth((s) => s.podeEditar());
+   220→   220→  const queryClient = useQueryClient();
+   221→   221→
+   222→   222→  const q = useQuery<Despesa[]>({
+   223→   223→    queryKey: ["despesas"],
+   224→   224→    queryFn: () => apiFetch<Despesa[]>("/api/despesas"),
+   225→   225→  });
+   226→   226→
+   227→   227→  const [novoNome, setNovoNome] = useState("");
+   228→   228→  const [novoValor, setNovoValor] = useState("");
+   229→   229→
+   230→   230→  const total = useMemo(
+   231→   231→    () => (q.data ?? []).reduce((acc, d) => acc + num(d.valor), 0),
+   232→   232→    [q.data]
+   233→   233→  );
+   234→   234→
+   235→   235→  const addMut = useMutation({
+   236→   236→    mutationFn: (vars: { nome: string; valor: number }) =>
+   237→   237→      apiFetch<Despesa>("/api/despesas", {
+   238→   238→        method: "POST",
+   239→   239→        body: JSON.stringify(vars),
+   240→   240→      }),
+   241→   241→    onSuccess: () => {
+   242→   242→      queryClient.invalidateQueries({ queryKey: ["despesas"] });
+   243→   243→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   244→   244→      setNovoNome("");
+   245→   245→      setNovoValor("");
+   246→   246→      toast.success("Despesa adicionada");
+   247→   247→    },
+   248→   248→    onError: (e: Error) => toast.error(e.message),
+   249→   249→  });
+   250→   250→
+   251→   251→  const putMut = useMutation({
+   252→   252→    mutationFn: (vars: { id: string; nome: string; valor: number }) =>
+   253→   253→      apiFetch<Despesa>(`/api/despesas/${vars.id}`, {
+   254→   254→        method: "PUT",
+   255→   255→        body: JSON.stringify({ nome: vars.nome, valor: vars.valor }),
+   256→   256→      }),
+   257→   257→    onSuccess: () => {
+   258→   258→      queryClient.invalidateQueries({ queryKey: ["despesas"] });
+   259→   259→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   260→   260→      toast.success("Despesa atualizada");
+   261→   261→    },
+   262→   262→    onError: (e: Error) => toast.error(e.message),
+   263→   263→  });
+   264→   264→
+   265→   265→  const delMut = useMutation({
+   266→   266→    mutationFn: (id: string) =>
+   267→   267→      apiFetch<void>(`/api/despesas/${id}`, { method: "DELETE" }),
+   268→   268→    onSuccess: () => {
+   269→   269→      queryClient.invalidateQueries({ queryKey: ["despesas"] });
+   270→   270→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   271→   271→      toast.success("Despesa removida");
+   272→   272→    },
+   273→   273→    onError: (e: Error) => toast.error(e.message),
+   274→   274→  });
+   275→   275→
+   276→   276→  function handleAdd() {
+   277→   277→    const nome = novoNome.trim();
+   278→   278→    const valor = num(novoValor);
+   279→   279→    if (!nome) {
+   280→   280→      toast.error("Informe o nome da despesa");
+   281→   281→      return;
+   282→   282→    }
+   283→   283→    if (!(valor >= 0)) {
+   284→   284→      toast.error("Informe um valor válido");
+   285→   285→      return;
+   286→   286→    }
+   287→   287→    addMut.mutate({ nome, valor });
+   288→   288→  }
+   289→   289→
+   290→   290→  return (
+   291→   291→    <motion.div
+   292→   292→      initial={{ opacity: 0, y: 4 }}
+   293→   293→      animate={{ opacity: 1, y: 0 }}
+   294→   294→      transition={{ duration: 0.2 }}
+   295→   295→      className="space-y-4"
+   296→   296→    >
+   297→   297→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   298→   298→        <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
+   299→   299→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+   300→   300→            Despesas fixas mensais
+   301→   301→          </h3>
+   302→   302→          <span className="text-[11px] text-[var(--text-app-muted)]">
+   303→   303→            {(q.data ?? []).length}{" "}
+   304→   304→            {(q.data ?? []).length === 1 ? "item" : "itens"}
+   305→   305→          </span>
+   306→   306→        </div>
+   307→   307→
+   308→   308→        {/* Inline add form */}
+   309→   309→        {podeEditar && (
+   310→   310→          <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] flex flex-col sm:flex-row sm:items-end gap-3">
+   311→   311→            <div className="flex-1">
+   312→   312→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+   313→   313→                Nome da despesa
+   314→   314→              </Label>
+   315→   315→              <Input
+   316→   316→                value={novoNome}
+   317→   317→                onChange={(e) => setNovoNome(e.target.value)}
+   318→   318→                placeholder="Ex.: Aluguel, Energia, Internet…"
+   319→   319→                className={inputCls}
+   320→   320→                onKeyDown={(e) => {
+   321→   321→                  if (e.key === "Enter") handleAdd();
+   322→   322→                }}
+   323→   323→              />
+   324→   324→            </div>
+   325→   325→            <div className="w-full sm:w-40">
+   326→   326→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+   327→   327→                Valor médio (R$)
+   328→   328→              </Label>
+   329→   329→              <Input
+   330→   330→                type="number"
+   331→   331→                inputMode="decimal"
+   332→   332→                step="0.01"
+   333→   333→                min="0"
+   334→   334→                value={novoValor}
+   335→   335→                onChange={(e) => setNovoValor(e.target.value)}
+   336→   336→                placeholder="0,00"
+   337→   337→                className={`${inputCls} font-mono tabular-nums text-right`}
+   338→   338→                onKeyDown={(e) => {
+   339→   339→                  if (e.key === "Enter") handleAdd();
+   340→   340→                }}
+   341→   341→              />
+   342→   342→            </div>
+   343→   343→            <Button
+   344→   344→              type="button"
+   345→   345→              size="sm"
+   346→   346→              onClick={handleAdd}
+   347→   347→              disabled={addMut.isPending}
+   348→   348→              className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)] shrink-0"
+   349→   349→            >
+   350→   350→              <Plus size={14} />
+   351→   351→              {addMut.isPending ? "Adicionando…" : "Adicionar"}
+   352→   352→            </Button>
+   353→   353→          </div>
+   354→   354→        )}
+   355→   355→
+   356→   356→        {/* Table / states */}
+   357→   357→        {q.isLoading ? (
+   358→   358→          <TableSkeleton cols={3} />
+   359→   359→        ) : q.isError ? (
+   360→   360→          <ErrorState
+   361→   361→            message={q.error?.message ?? "Falha ao carregar despesas"}
+   362→   362→            onRetry={() => q.refetch()}
+   363→   363→          />
+   364→   364→        ) : (q.data ?? []).length === 0 ? (
+   365→   365→          <EmptyState
+   366→   366→            icon={<Wallet size={22} strokeWidth={1.5} />}
+   367→   367→            title="Nenhuma despesa cadastrada"
+   368→   368→            hint={
+   369→   369→              podeEditar
+   370→   370→                ? "Use o formulário acima para adicionar aluguel, energia, salários, etc. Esses custos entram no cálculo do custo fixo por minuto."
+   371→   371→                : "Aguarde o gestor cadastrar as despesas fixas da clínica."
+   372→   372→            }
+   373→   373→          />
+   374→   374→        ) : (
+   375→   375→          <div className="max-h-96 overflow-y-auto scroll-thin">
+   376→   376→            <Table className="text-sm">
+   377→   377→              <TableHeader>
+   378→   378→                <TableRow className="border-[var(--border-app)] hover:bg-transparent">
+   379→   379→                  <TableHead className="text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2">
+   380→   380→                    Despesa
+   381→   381→                  </TableHead>
+   382→   382→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-40">
+   383→   383→                    Valor médio mensal
+   384→   384→                  </TableHead>
+   385→   385→                  <TableHead className="w-12 px-2" />
+   386→   386→                </TableRow>
+   387→   387→              </TableHeader>
+   388→   388→              <TableBody>
+   389→   389→                {(q.data ?? []).map((d) => (
+   390→   390→                  <DespesaRow
+   391→   391→                    key={d.id}
+   392→   392→                    despesa={d}
+   393→   393→                    podeEditar={podeEditar}
+   394→   394→                    onSalvar={(nome, valor) =>
+   395→   395→                      putMut.mutate({ id: d.id, nome, valor })
+   396→   396→                    }
+   397→   397→                    onRemover={() => delMut.mutate(d.id)}
+   398→   398→                    salvando={putMut.isPending && putMut.variables?.id === d.id}
+   399→   399→                  />
+   400→   400→                ))}
+   401→   401→              </TableBody>
+   402→   402→              <TableFooter className="bg-[var(--bg-app)] border-t border-[var(--border-app)] font-medium">
+   403→   403→                <TableRow className="border-0 hover:bg-transparent">
+   404→   404→                  <TableCell className="px-4 py-2 text-xs uppercase tracking-wide text-[var(--text-app-muted)]">
+   405→   405→                    Total
+   406→   406→                  </TableCell>
+   407→   407→                  <TableCell className="px-4 py-2 text-right font-mono tabular-nums text-[var(--text-app)]">
+   408→   408→                    {brl(total)}
+   409→   409→                  </TableCell>
+   410→   410→                  <TableCell />
+   411→   411→                </TableRow>
+   412→   412→              </TableFooter>
+   413→   413→            </Table>
+   414→   414→          </div>
+   415→   415→        )}
+   416→   416→      </Card>
+   417→   417→
+   418→   418→      <p className="text-[11px] text-[var(--text-app-muted)] px-1">
+   419→   419→        As despesas fixas compõem o custo fixo mensal da clínica e entram no
+   420→   420→        rateio por minuto para a precificação de procedimentos.
+   421→   421→      </p>
+   422→   422→    </motion.div>
+   423→   423→  );
+   424→   424→}
+   425→   425→
+   426→   426→function DespesaRow({
+   427→   427→  despesa,
+   428→   428→  podeEditar,
+   429→   429→  onSalvar,
+   430→   430→  onRemover,
+   431→   431→  salvando,
+   432→   432→}: {
+   433→   433→  despesa: Despesa;
+   434→   434→  podeEditar: boolean;
+   435→   435→  onSalvar: (nome: string, valor: number) => void;
+   436→   436→  onRemover: () => void;
+   437→   437→  salvando: boolean;
+   438→   438→}) {
+   439→   439→  // Uncontrolled inputs with defaultValue + key={d.id} (from parent).
+   440→   440→  // Initial value comes from the server on first mount; subsequent refetches
+   441→   441→  // with the same id keep the user's local edits (no re-init).
+   442→   442→  function commitNome(novoNome: string) {
+   443→   443→    const n = novoNome.trim();
+   444→   444→    if (!n) {
+   445→   445→      toast.error("Nome não pode ser vazio");
+   446→   446→      return;
+   447→   447→    }
+   448→   448→    if (n !== despesa.nome) {
+   449→   449→      onSalvar(n, num(despesa.valor));
+   450→   450→    }
+   451→   451→  }
+   452→   452→
+   453→   453→  function commitValor(novoValor: string) {
+   454→   454→    const v = num(novoValor);
+   455→   455→    if (!(v >= 0)) {
+   456→   456→      toast.error("Valor inválido");
+   457→   457→      return;
+   458→   458→    }
+   459→   459→    if (v !== num(despesa.valor)) {
+   460→   460→      onSalvar(despesa.nome, v);
+   461→   461→    }
+   462→   462→  }
+   463→   463→
+   464→   464→  return (
+   465→   465→    <TableRow className="border-t border-[var(--border-app-subtle)] hover:bg-[var(--bg-app)]/40">
+   466→   466→      <TableCell className="px-4 py-1.5">
+   467→   467→        <Input
+   468→   468→          defaultValue={despesa.nome}
+   469→   469→          onBlur={(e) => commitNome(e.currentTarget.value)}
+   470→   470→          disabled={!podeEditar || salvando}
+   471→   471→          className={`${inputCls} ${cellInputCls} ${
+   472→   472→            podeEditar ? "" : "opacity-70"
+   473→   473→          }`}
+   474→   474→        />
+   475→   475→      </TableCell>
+   476→   476→      <TableCell className="px-4 py-1.5">
+   477→   477→        <Input
+   478→   478→          type="number"
+   479→   479→          inputMode="decimal"
+   480→   480→          step="0.01"
+   481→   481→          min="0"
+   482→   482→          defaultValue={despesa.valor ?? 0}
+   483→   483→          onBlur={(e) => commitValor(e.currentTarget.value)}
+   484→   484→          disabled={!podeEditar || salvando}
+   485→   485→          className={`${inputCls} ${cellInputCls} text-right font-mono tabular-nums ${
+   486→   486→            podeEditar ? "" : "opacity-70"
+   487→   487→          }`}
+   488→   488→        />
+   489→   489→      </TableCell>
+   490→   490→      <TableCell className="px-2 text-center">
+   491→   491→        <Button
+   492→   492→          type="button"
+   493→   493→          variant="ghost"
+   494→   494→          size="icon"
+   495→   495→          className="h-8 w-8 text-[var(--text-app-muted)] hover:text-[var(--danger-app)] hover:bg-[var(--danger-app-bg)]"
+   496→   496→          onClick={onRemover}
+   497→   497→          disabled={!podeEditar || salvando}
+   498→   498→          title="Remover despesa"
+   499→   499→        >
+   500→   500→          <Trash2 size={14} />
+   501→   501→        </Button>
+   502→   502→      </TableCell>
+   503→   503→    </TableRow>
+   504→   504→  );
+   505→   505→}
+   506→   506→
+   507→   507→// ----------------------------------------------------------------------------
+   508→   508→// 2. Capacidade produtiva
+   509→   509→// ----------------------------------------------------------------------------
+   510→   510→const CAPACIDADE_DEFAULTS: Capacidade = {
+   511→   511→  clinicaId: "",
+   512→   512→  diasTrabalhados: 20,
+   513→   513→  horasPorDia: 8,
+   514→   514→  unidadesRenda: 1,
+   515→   515→  percentOcupacao: 0.75,
+   516→   516→};
+   517→   517→
+   518→   518→function CapacidadePanel() {
+   519→   519→  const capQ = useQuery<Capacidade | null>({
+   520→   520→    queryKey: ["capacidade"],
+   521→   521→    queryFn: () => apiFetch<Capacidade | null>("/api/capacidade"),
+   522→   522→  });
+   523→   523→
+   524→   524→  // Aux queries to compute custoFixoPorHora preview from despesas+ativos
+   525→   525→  const despesasQ = useQuery<Despesa[]>({
+   526→   526→    queryKey: ["despesas"],
+   527→   527→    queryFn: () => apiFetch<Despesa[]>("/api/despesas"),
+   528→   528→  });
+   529→   529→  const ativosQ = useQuery<Ativo[]>({
+   530→   530→    queryKey: ["ativos"],
+   531→   531→    queryFn: () => apiFetch<Ativo[]>("/api/ativos"),
+   532→   532→  });
+   533→   533→
+   534→   534→  const custoFixo = useMemo(() => {
+   535→   535→    const desp = (despesasQ.data ?? []).reduce((a, d) => a + num(d.valor), 0);
+   536→   536→    const dep = (ativosQ.data ?? []).reduce(
+   537→   537→      (a, x) =>
+   538→   538→        a +
+   539→   539→        (num(x.vidaUtilAnos) > 0
+   540→   540→          ? num(x.valorAquisicao) / num(x.vidaUtilAnos) / 12
+   541→   541→          : 0),
+   542→   542→      0
+   543→   543→    );
+   544→   544→    return desp + dep;
+   545→   545→  }, [despesasQ.data, ativosQ.data]);
+   546→   546→
+   547→   547→  if (capQ.isLoading) {
+   548→   548→    return (
+   549→   549→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   550→   550→        <div className="p-5 space-y-4">
+   551→   551→          <Skeleton className="h-5 w-48 bg-[var(--bg-app-alt-strong)]" />
+   552→   552→          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+   553→   553→            {Array.from({ length: 4 }).map((_, i) => (
+   554→   554→              <Skeleton
+   555→   555→                key={i}
+   556→   556→                className="h-16 bg-[var(--bg-app-alt-strong)]"
+   557→   557→              />
+   558→   558→            ))}
+   559→   559→          </div>
+   560→   560→        </div>
+   561→   561→      </Card>
+   562→   562→    );
+   563→   563→  }
+   564→   564→
+   565→   565→  if (capQ.isError) {
+   566→   566→    return (
+   567→   567→      <ErrorState
+   568→   568→        message={capQ.error?.message ?? "Falha ao carregar capacidade"}
+   569→   569→        onRetry={() => capQ.refetch()}
+   570→   570→      />
+   571→   571→    );
+   572→   572→  }
+   573→   573→
+   574→   574→  const semCapacidade = capQ.isSuccess && capQ.data === null;
+   575→   575→  // `key` forces remount (and re-init of useState) when transitioning from
+   576→   576→  // null → configured capacidade. Stable id while the same data is shown.
+   577→   577→  const formKey = capQ.data?.clinicaId ?? "novo";
+   578→   578→
+   579→   579→  return (
+   580→   580→    <CapacidadeForm
+   581→   581→      key={formKey}
+   582→   582→      initial={capQ.data ?? CAPACIDADE_DEFAULTS}
+   583→   583→      semCapacidade={semCapacidade}
+   584→   584→      custoFixo={custoFixo}
+   585→   585→    />
+   586→   586→  );
+   587→   587→}
+   588→   588→
+   589→   589→function CapacidadeForm({
+   590→   590→  initial,
+   591→   591→  semCapacidade,
+   592→   592→  custoFixo,
+   593→   593→}: {
+   594→   594→  initial: Capacidade;
+   595→   595→  semCapacidade: boolean;
+   596→   596→  custoFixo: number;
+   597→   597→}) {
+   598→   598→  const podeEditar = useAuth((s) => s.podeEditar());
+   599→   599→  const queryClient = useQueryClient();
+   600→   600→
+   601→   601→  // Local state initialized once per mount (parent uses `key` to remount when
+   602→   602→  // the underlying capacidade changes between null↔configured).
+   603→   603→  const [dias, setDias] = useState(String(initial.diasTrabalhados ?? 0));
+   604→   604→  const [horas, setHoras] = useState(String(initial.horasPorDia ?? 0));
+   605→   605→  const [unidades, setUnidades] = useState(String(initial.unidadesRenda ?? 0));
+   606→   606→  const [pct, setPct] = useState(
+   607→   607→    String(((initial.percentOcupacao ?? 0) * 100).toFixed(0))
+   608→   608→  ); // 0..100 in UI
+   609→   609→
+   610→   610→  const temCustos = custoFixo > 0;
+   611→   611→
+   612→   612→  const horasEfetivas = useMemo(() => {
+   613→   613→    const d = num(dias);
+   614→   614→    const h = num(horas);
+   615→   615→    const u = num(unidades);
+   616→   616→    const o = num(pct) / 100;
+   617→   617→    return d * h * u * o;
+   618→   618→  }, [dias, horas, unidades, pct]);
+   619→   619→
+   620→   620→  const custoFixoPorHora =
+   621→   621→    horasEfetivas > 0 && temCustos ? custoFixo / horasEfetivas : null;
+   622→   622→  const custoFixoPorMinuto =
+   623→   623→    horasEfetivas > 0 && temCustos ? custoFixo / (horasEfetivas * 60) : null;
+   624→   624→
+   625→   625→  const saveMut = useMutation({
+   626→   626→    mutationFn: (vars: {
+   627→   627→      diasTrabalhados: number;
+   628→   628→      horasPorDia: number;
+   629→   629→      unidadesRenda: number;
+   630→   630→      percentOcupacao: number;
+   631→   631→    }) =>
+   632→   632→      apiFetch<Capacidade>("/api/capacidade", {
+   633→   633→        method: "PUT",
+   634→   634→        body: JSON.stringify(vars),
+   635→   635→      }),
+   636→   636→    onSuccess: () => {
+   637→   637→      queryClient.invalidateQueries({ queryKey: ["capacidade"] });
+   638→   638→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   639→   639→      toast.success("Capacidade produtiva salva");
+   640→   640→    },
+   641→   641→    onError: (e: Error) => toast.error(e.message),
+   642→   642→  });
+   643→   643→
+   644→   644→  function handleSalvar() {
+   645→   645→    const d = num(dias);
+   646→   646→    const h = num(horas);
+   647→   647→    const u = num(unidades);
+   648→   648→    const o = num(pct) / 100;
+   649→   649→    if (!(d > 0) || !(h > 0) || !(u > 0)) {
+   650→   650→      toast.error("Dias, horas e unidades devem ser maiores que zero");
+   651→   651→      return;
+   652→   652→    }
+   653→   653→    if (!(o >= 0 && o <= 1)) {
+   654→   654→      toast.error("Ocupação deve estar entre 0% e 100%");
+   655→   655→      return;
+   656→   656→    }
+   657→   657→    saveMut.mutate({
+   658→   658→      diasTrabalhados: d,
+   659→   659→      horasPorDia: h,
+   660→   660→      unidadesRenda: u,
+   661→   661→      percentOcupacao: o,
+   662→   662→    });
+   663→   663→  }
+   664→   664→
+   665→   665→  return (
+   666→   666→    <motion.div
+   667→   667→      initial={{ opacity: 0, y: 4 }}
+   668→   668→      animate={{ opacity: 1, y: 0 }}
+   669→   669→      transition={{ duration: 0.2 }}
+   670→   670→      className="space-y-4"
+   671→   671→    >
+   672→   672→      {semCapacidade && (
+   673→   673→        <Card className="bg-[var(--warning-app-bg)] border-[var(--warning-app-border)] py-0 shadow-none">
+   674→   674→          <div className="px-4 py-3 flex items-start gap-3">
+   675→   675→            <AlertTriangle
+   676→   676→              size={18}
+   677→   677→              className="text-[var(--warning-app)] shrink-0 mt-0.5"
+   678→   678→              strokeWidth={1.75}
+   679→   679→            />
+   680→   680→            <div className="text-sm text-[var(--warning-app-strong)]">
+   681→   681→              <div className="font-medium">
+   682→   682→                Configure a capacidade produtiva para começar
+   683→   683→              </div>
+   684→   684→              <div className="text-xs text-[var(--warning-app)] mt-0.5">
+   685→   685→                Sem essa configuração não é possível calcular o custo fixo por
+   686→   686→                minuto utilizado na precificação. Já preenchemos valores
+   687→   687→                sugeridos — ajuste e salve.
+   688→   688→              </div>
+   689→   689→            </div>
+   690→   690→          </div>
+   691→   691→        </Card>
+   692→   692→      )}
+   693→   693→
+   694→   694→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   695→   695→        <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
+   696→   696→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+   697→   697→            Capacidade produtiva mensal
+   698→   698→          </h3>
+   699→   699→          {podeEditar && (
+   700→   700→            <Button
+   701→   701→              type="button"
+   702→   702→              size="sm"
+   703→   703→              onClick={handleSalvar}
+   704→   704→              disabled={saveMut.isPending}
+   705→   705→              className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)]"
+   706→   706→            >
+   707→   707→              {saveMut.isPending ? "Salvando…" : "Salvar"}
+   708→   708→            </Button>
+   709→   709→          )}
+   710→   710→        </div>
+   711→   711→
+   712→   712→        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+   713→   713→          <CapacidadeField
+   714→   714→            label="Dias trabalhados / mês"
+   715→   715→            value={dias}
+   716→   716→            onChange={setDias}
+   717→   717→            disabled={!podeEditar}
+   718→   718→          />
+   719→   719→          <CapacidadeField
+   720→   720→            label="Horas por dia"
+   721→   721→            value={horas}
+   722→   722→            onChange={setHoras}
+   723→   723→            disabled={!podeEditar}
+   724→   724→          />
+   725→   725→          <CapacidadeField
+   726→   726→            label="Unidades de renda"
+   727→   727→            hint="Salas / aparelhos"
+   728→   728→            value={unidades}
+   729→   729→            onChange={setUnidades}
+   730→   730→            disabled={!podeEditar}
+   731→   731→          />
+   732→   732→          <CapacidadeField
+   733→   733→            label="% de ocupação"
+   734→   734→            suffix="%"
+   735→   735→            step="1"
+   736→   736→            value={pct}
+   737→   737→            onChange={setPct}
+   738→   738→            disabled={!podeEditar}
+   739→   739→          />
+   740→   740→        </div>
+   741→   741→
+   742→   742→        {/* Computed summary */}
+   743→   743→        <div className="px-4 pb-4">
+   744→   744→          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-lg border border-[var(--border-app-subtle)] bg-[var(--bg-app)] p-3">
+   745→   745→            <SummaryItem
+   746→   746→              icon={<Timer size={15} strokeWidth={1.75} />}
+   747→   747→              label="Horas efetivas / mês"
+   748→   748→              value={`${horasEfetivas.toFixed(0)}h`}
+   749→   749→            />
+   750→   750→            <SummaryItem
+   751→   751→              icon={<Clock size={15} strokeWidth={1.75} />}
+   752→   752→              label="Custo fixo / hora"
+   753→   753→              value={custoFixoPorHora !== null ? brl(custoFixoPorHora) : "—"}
+   754→   754→              accent
+   755→   755→            />
+   756→   756→            <SummaryItem
+   757→   757→              icon={<Gauge size={15} strokeWidth={1.75} />}
+   758→   758→              label="Custo fixo / minuto"
+   759→   759→              value={
+   760→   760→                custoFixoPorMinuto !== null ? brl(custoFixoPorMinuto) : "—"
+   761→   761→              }
+   762→   762→              accent
+   763→   763→            />
+   764→   764→          </div>
+   765→   765→          {!temCustos && (
+   766→   766→            <p className="text-[11px] text-[var(--text-app-muted)] mt-2">
+   767→   767→              Cadastre despesas fixas ou equipamentos na aba correspondente
+   768→   768→              para calcular o custo fixo por hora.
+   769→   769→            </p>
+   770→   770→          )}
+   771→   771→        </div>
+   772→   772→      </Card>
+   773→   773→
+   774→   774→      <p className="text-[11px] text-[var(--text-app-muted)] px-1">
+   775→   775→        Horas efetivas = dias × horas por dia × unidades × ocupação. Esse
+   776→   776→        número divide o custo fixo total para chegar ao custo por hora (e por
+   777→   777→        minuto) usado na precificação.
+   778→   778→      </p>
+   779→   779→    </motion.div>
+   780→   780→  );
+   781→   781→}
+   782→   782→
+   783→   783→function CapacidadeField({
+   784→   784→  label,
+   785→   785→  value,
+   786→   786→  onChange,
+   787→   787→  disabled,
+   788→   788→  hint,
+   789→   789→  suffix,
+   790→   790→  step,
+   791→   791→}: {
+   792→   792→  label: string;
+   793→   793→  value: string;
+   794→   794→  onChange: (v: string) => void;
+   795→   795→  disabled?: boolean;
+   796→   796→  hint?: string;
+   797→   797→  suffix?: string;
+   798→   798→  step?: string;
+   799→   799→}) {
+   800→   800→  return (
+   801→   801→    <div>
+   802→   802→      <Label className="text-[11px] text-[var(--text-app-muted)] block mb-1">
+   803→   803→        {label}
+   804→   804→      </Label>
+   805→   805→      <div className="relative">
+   806→   806→        <Input
+   807→   807→          type="number"
+   808→   808→          inputMode="decimal"
+   809→   809→          min="0"
+   810→   810→          step={step ?? "1"}
+   811→   811→          value={value}
+   812→   812→          onChange={(e) => onChange(e.target.value)}
+   813→   813→          disabled={disabled}
+   814→   814→          className={`${inputCls} font-mono tabular-nums text-right pr-8`}
+   815→   815→        />
+   816→   816→        {suffix && (
+   817→   817→          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[var(--text-app-muted)]">
+   818→   818→            {suffix}
+   819→   819→          </span>
+   820→   820→        )}
+   821→   821→      </div>
+   822→   822→      {hint && (
+   823→   823→        <div className="text-[10px] text-[var(--text-app-faint)] mt-1">
+   824→   824→          {hint}
+   825→   825→        </div>
+   826→   826→      )}
+   827→   827→    </div>
+   828→   828→  );
+   829→   829→}
+   830→   830→
+   831→   831→function SummaryItem({
+   832→   832→  icon,
+   833→   833→  label,
+   834→   834→  value,
+   835→   835→  accent,
+   836→   836→}: {
+   837→   837→  icon: React.ReactNode;
+   838→   838→  label: string;
+   839→   839→  value: string;
+   840→   840→  accent?: boolean;
+   841→   841→}) {
+   842→   842→  return (
+   843→   843→    <div className="flex items-center gap-3">
+   844→   844→      <div
+   845→   845→        className={`w-7 h-7 rounded-md grid place-items-center shrink-0 ${
+   846→   846→          accent
+   847→   847→            ? "bg-[var(--accent-app-soft-bg)] text-[var(--accent-app-text)]"
+   848→   848→            : "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)]"
+   849→   849→        }`}
+   850→   850→      >
+   851→   851→        {icon}
+   852→   852→      </div>
+   853→   853→      <div className="min-w-0">
+   854→   854→        <div className="text-[10px] uppercase tracking-wide text-[var(--text-app-muted)] truncate">
+   855→   855→          {label}
+   856→   856→        </div>
+   857→   857→        <div
+   858→   858→          className={`text-base font-mono tabular-nums ${
+   859→   859→            accent ? "text-[var(--accent-app-text)]" : "text-[var(--text-app)]"
+   860→   860→          }`}
+   861→   861→        >
+   862→   862→          {value}
+   863→   863→        </div>
+   864→   864→      </div>
+   865→   865→    </div>
+   866→   866→  );
+   867→   867→}
+   868→   868→
+   869→   869→// ----------------------------------------------------------------------------
+   870→   870→// 3. Ativos / Equipamentos
+   871→   871→// ----------------------------------------------------------------------------
+   872→   872→function AtivosPanel() {
+   873→   873→  const podeEditar = useAuth((s) => s.podeEditar());
+   874→   874→  const queryClient = useQueryClient();
+   875→   875→
+   876→   876→  const q = useQuery<Ativo[]>({
+   877→   877→    queryKey: ["ativos"],
+   878→   878→    queryFn: () => apiFetch<Ativo[]>("/api/ativos"),
+   879→   879→  });
+   880→   880→
+   881→   881→  const [novoNome, setNovoNome] = useState("");
+   882→   882→  const [novoData, setNovoData] = useState("");
+   883→   883→  const [novoValor, setNovoValor] = useState("");
+   884→   884→  const [novoVida, setNovoVida] = useState("");
+   885→   885→
+   886→   886→  const depTotal = useMemo(
+   887→   887→    () =>
+   888→   888→      (q.data ?? []).reduce(
+   889→   889→        (a, x) =>
+   890→   890→          a +
+   891→   891→          (num(x.vidaUtilAnos) > 0
+   892→   892→            ? num(x.valorAquisicao) / num(x.vidaUtilAnos) / 12
+   893→   893→            : 0),
+   894→   894→        0
+   895→   895→      ),
+   896→   896→    [q.data]
+   897→   897→  );
+   898→   898→
+   899→   899→  const addMut = useMutation({
+   900→   900→    mutationFn: (vars: {
+   901→   901→      nome: string;
+   902→   902→      dataAquisicao: string | null;
+   903→   903→      valorAquisicao: number;
+   904→   904→      vidaUtilAnos: number;
+   905→   905→    }) =>
+   906→   906→      apiFetch<Ativo>("/api/ativos", {
+   907→   907→        method: "POST",
+   908→   908→        body: JSON.stringify(vars),
+   909→   909→      }),
+   910→   910→    onSuccess: () => {
+   911→   911→      queryClient.invalidateQueries({ queryKey: ["ativos"] });
+   912→   912→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   913→   913→      setNovoNome("");
+   914→   914→      setNovoData("");
+   915→   915→      setNovoValor("");
+   916→   916→      setNovoVida("");
+   917→   917→      toast.success("Equipamento adicionado");
+   918→   918→    },
+   919→   919→    onError: (e: Error) => toast.error(e.message),
+   920→   920→  });
+   921→   921→
+   922→   922→  const putMut = useMutation({
+   923→   923→    mutationFn: (vars: {
+   924→   924→      id: string;
+   925→   925→      nome?: string;
+   926→   926→      dataAquisicao?: string | null;
+   927→   927→      valorAquisicao?: number;
+   928→   928→      vidaUtilAnos?: number;
+   929→   929→    }) =>
+   930→   930→      apiFetch<Ativo>(`/api/ativos/${vars.id}`, {
+   931→   931→        method: "PUT",
+   932→   932→        body: JSON.stringify({
+   933→   933→          ...(vars.nome !== undefined ? { nome: vars.nome } : {}),
+   934→   934→          ...(vars.dataAquisicao !== undefined
+   935→   935→            ? { dataAquisicao: vars.dataAquisicao }
+   936→   936→            : {}),
+   937→   937→          ...(vars.valorAquisicao !== undefined
+   938→   938→            ? { valorAquisicao: vars.valorAquisicao }
+   939→   939→            : {}),
+   940→   940→          ...(vars.vidaUtilAnos !== undefined
+   941→   941→            ? { vidaUtilAnos: vars.vidaUtilAnos }
+   942→   942→            : {}),
+   943→   943→        }),
+   944→   944→      }),
+   945→   945→    onSuccess: () => {
+   946→   946→      queryClient.invalidateQueries({ queryKey: ["ativos"] });
+   947→   947→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   948→   948→      toast.success("Equipamento atualizado");
+   949→   949→    },
+   950→   950→    onError: (e: Error) => toast.error(e.message),
+   951→   951→  });
+   952→   952→
+   953→   953→  const delMut = useMutation({
+   954→   954→    mutationFn: (id: string) =>
+   955→   955→      apiFetch<void>(`/api/ativos/${id}`, { method: "DELETE" }),
+   956→   956→    onSuccess: () => {
+   957→   957→      queryClient.invalidateQueries({ queryKey: ["ativos"] });
+   958→   958→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+   959→   959→      toast.success("Equipamento removido");
+   960→   960→    },
+   961→   961→    onError: (e: Error) => toast.error(e.message),
+   962→   962→  });
+   963→   963→
+   964→   964→  function handleAdd() {
+   965→   965→    const nome = novoNome.trim();
+   966→   966→    if (!nome) {
+   967→   967→      toast.error("Informe o nome do equipamento");
+   968→   968→      return;
+   969→   969→    }
+   970→   970→    addMut.mutate({
+   971→   971→      nome,
+   972→   972→      dataAquisicao: novoData || null,
+   973→   973→      valorAquisicao: num(novoValor),
+   974→   974→      vidaUtilAnos: num(novoVida) || 1,
+   975→   975→    });
+   976→   976→  }
+   977→   977→
+   978→   978→  return (
+   979→   979→    <motion.div
+   980→   980→      initial={{ opacity: 0, y: 4 }}
+   981→   981→      animate={{ opacity: 1, y: 0 }}
+   982→   982→      transition={{ duration: 0.2 }}
+   983→   983→      className="space-y-4"
+   984→   984→    >
+   985→   985→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   986→   986→        <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
+   987→   987→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+   988→   988→            Equipamentos e móveis (depreciação)
+   989→   989→          </h3>
+   990→   990→          <span className="text-[11px] text-[var(--text-app-muted)]">
+   991→   991→            {(q.data ?? []).length}{" "}
+   992→   992→            {(q.data ?? []).length === 1 ? "item" : "itens"}
+   993→   993→          </span>
+   994→   994→        </div>
+   995→   995→
+   996→   996→        {podeEditar && (
+   997→   997→          <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+   998→   998→            <div className="lg:col-span-2">
+   999→   999→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1000→  1000→                Nome
+  1001→  1001→              </Label>
+  1002→  1002→              <Input
+  1003→  1003→                value={novoNome}
+  1004→  1004→                onChange={(e) => setNovoNome(e.target.value)}
+  1005→  1005→                placeholder="Ex.: Panorâmico, Computador…"
+  1006→  1006→                className={inputCls}
+  1007→  1007→              />
+  1008→  1008→            </div>
+  1009→  1009→            <div>
+  1010→  1010→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1011→  1011→                Aquisição
+  1012→  1012→              </Label>
+  1013→  1013→              <Input
+  1014→  1014→                type="date"
+  1015→  1015→                value={novoData}
+  1016→  1016→                onChange={(e) => setNovoData(e.target.value)}
+  1017→  1017→                className={`${inputCls} font-mono tabular-nums`}
+  1018→  1018→              />
+  1019→  1019→            </div>
+  1020→  1020→            <div>
+  1021→  1021→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1022→  1022→                Valor pago (R$)
+  1023→  1023→              </Label>
+  1024→  1024→              <Input
+  1025→  1025→                type="number"
+  1026→  1026→                inputMode="decimal"
+  1027→  1027→                step="0.01"
+  1028→  1028→                min="0"
+  1029→  1029→                value={novoValor}
+  1030→  1030→                onChange={(e) => setNovoValor(e.target.value)}
+  1031→  1031→                placeholder="0,00"
+  1032→  1032→                className={`${inputCls} text-right font-mono tabular-nums`}
+  1033→  1033→              />
+  1034→  1034→            </div>
+  1035→  1035→            <div>
+  1036→  1036→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1037→  1037→                Vida útil (anos)
+  1038→  1038→              </Label>
+  1039→  1039→              <Input
+  1040→  1040→                type="number"
+  1041→  1041→                inputMode="decimal"
+  1042→  1042→                step="1"
+  1043→  1043→                min="1"
+  1044→  1044→                value={novoVida}
+  1045→  1045→                onChange={(e) => setNovoVida(e.target.value)}
+  1046→  1046→                placeholder="5"
+  1047→  1047→                className={`${inputCls} text-right font-mono tabular-nums`}
+  1048→  1048→              />
+  1049→  1049→            </div>
+  1050→  1050→            <div className="lg:col-span-5 flex justify-end">
+  1051→  1051→              <Button
+  1052→  1052→                type="button"
+  1053→  1053→                size="sm"
+  1054→  1054→                onClick={handleAdd}
+  1055→  1055→                disabled={addMut.isPending}
+  1056→  1056→                className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)]"
+  1057→  1057→              >
+  1058→  1058→                <Plus size={14} />
+  1059→  1059→                {addMut.isPending ? "Adicionando…" : "Adicionar equipamento"}
+  1060→  1060→              </Button>
+  1061→  1061→            </div>
+  1062→  1062→          </div>
+  1063→  1063→        )}
+  1064→  1064→
+  1065→  1065→        {q.isLoading ? (
+  1066→  1066→          <TableSkeleton cols={5} />
+  1067→  1067→        ) : q.isError ? (
+  1068→  1068→          <ErrorState
+  1069→  1069→            message={q.error?.message ?? "Falha ao carregar equipamentos"}
+  1070→  1070→            onRetry={() => q.refetch()}
+  1071→  1071→          />
+  1072→  1072→        ) : (q.data ?? []).length === 0 ? (
+  1073→  1073→          <EmptyState
+  1074→  1074→            icon={<Package size={22} strokeWidth={1.5} />}
+  1075→  1075→            title="Nenhum equipamento cadastrado"
+  1076→  1076→            hint={
+  1077→  1077→              podeEditar
+  1078→  1078→                ? "Cadastre equipamentos e móveis para incluir a depreciação mensal no custo fixo da clínica."
+  1079→  1079→                : "Aguarde o gestor cadastrar os equipamentos."
+  1080→  1080→            }
+  1081→  1081→          />
+  1082→  1082→        ) : (
+  1083→  1083→          <div className="max-h-96 overflow-y-auto scroll-thin">
+  1084→  1084→            <Table className="text-sm">
+  1085→  1085→              <TableHeader>
+  1086→  1086→                <TableRow className="border-[var(--border-app)] hover:bg-transparent">
+  1087→  1087→                  <TableHead className="text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2">
+  1088→  1088→                    Equipamento
+  1089→  1089→                  </TableHead>
+  1090→  1090→                  <TableHead className="text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-36">
+  1091→  1091→                    Aquisição
+  1092→  1092→                  </TableHead>
+  1093→  1093→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-32">
+  1094→  1094→                    Valor pago
+  1095→  1095→                  </TableHead>
+  1096→  1096→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-28">
+  1097→  1097→                    Vida útil (anos)
+  1098→  1098→                  </TableHead>
+  1099→  1099→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-32">
+  1100→  1100→                    Depreciação / mês
+  1101→  1101→                  </TableHead>
+  1102→  1102→                  <TableHead className="w-12 px-2" />
+  1103→  1103→                </TableRow>
+  1104→  1104→              </TableHeader>
+  1105→  1105→              <TableBody>
+  1106→  1106→                {(q.data ?? []).map((a) => (
+  1107→  1107→                  <AtivoRow
+  1108→  1108→                    key={a.id}
+  1109→  1109→                    ativo={a}
+  1110→  1110→                    podeEditar={podeEditar}
+  1111→  1111→                    onSalvar={(vars) => putMut.mutate({ id: a.id, ...vars })}
+  1112→  1112→                    onRemover={() => delMut.mutate(a.id)}
+  1113→  1113→                    salvando={putMut.isPending && putMut.variables?.id === a.id}
+  1114→  1114→                  />
+  1115→  1115→                ))}
+  1116→  1116→              </TableBody>
+  1117→  1117→              <TableFooter className="bg-[var(--bg-app)] border-t border-[var(--border-app)] font-medium">
+  1118→  1118→                <TableRow className="border-0 hover:bg-transparent">
+  1119→  1119→                  <TableCell
+  1120→  1120→                    className="px-4 py-2 text-xs uppercase tracking-wide text-[var(--text-app-muted)]"
+  1121→  1121→                    colSpan={4}
+  1122→  1122→                  >
+  1123→  1123→                    Depreciação mensal total
+  1124→  1124→                  </TableCell>
+  1125→  1125→                  <TableCell className="px-4 py-2 text-right font-mono tabular-nums text-[var(--text-app)]">
+  1126→  1126→                    {brl(depTotal)}
+  1127→  1127→                  </TableCell>
+  1128→  1128→                  <TableCell />
+  1129→  1129→                </TableRow>
+  1130→  1130→              </TableFooter>
+  1131→  1131→            </Table>
+  1132→  1132→          </div>
+  1133→  1133→        )}
+  1134→  1134→      </Card>
+  1135→  1135→
+  1136→  1136→      <p className="text-[11px] text-[var(--text-app-muted)] px-1">
+  1137→  1137→        Depreciação mensal = valor pago ÷ vida útil (anos) ÷ 12. Entra
+  1138→  1138→        automaticamente no custo fixo total, junto com as despesas fixas.
+  1139→  1139→      </p>
+  1140→  1140→    </motion.div>
+  1141→  1141→  );
+  1142→  1142→}
+  1143→  1143→
+  1144→  1144→function AtivoRow({
+  1145→  1145→  ativo,
+  1146→  1146→  podeEditar,
+  1147→  1147→  onSalvar,
+  1148→  1148→  onRemover,
+  1149→  1149→  salvando,
+  1150→  1150→}: {
+  1151→  1151→  ativo: Ativo;
+  1152→  1152→  podeEditar: boolean;
+  1153→  1153→  onSalvar: (vars: {
+  1154→  1154→    nome?: string;
+  1155→  1155→    dataAquisicao?: string | null;
+  1156→  1156→    valorAquisicao?: number;
+  1157→  1157→    vidaUtilAnos?: number;
+  1158→  1158→  }) => void;
+  1159→  1159→  onRemover: () => void;
+  1160→  1160→  salvando: boolean;
+  1161→  1161→}) {
+  1162→  1162→  // Uncontrolled inputs; parent uses `key={a.id}` to remount when row id changes.
+  1163→  1163→  const dep =
+  1164→  1164→    num(ativo.vidaUtilAnos) > 0
+  1165→  1165→      ? num(ativo.valorAquisicao) / num(ativo.vidaUtilAnos) / 12
+  1166→  1166→      : 0;
+  1167→  1167→
+  1168→  1168→  function commitNome(v: string) {
+  1169→  1169→    const n = v.trim();
+  1170→  1170→    if (!n) {
+  1171→  1171→      toast.error("Nome não pode ser vazio");
+  1172→  1172→      return;
+  1173→  1173→    }
+  1174→  1174→    if (n !== ativo.nome) onSalvar({ nome: n });
+  1175→  1175→  }
+  1176→  1176→
+  1177→  1177→  function commitData(v: string) {
+  1178→  1178→    if (v !== (ativo.dataAquisicao ?? "")) {
+  1179→  1179→      onSalvar({ dataAquisicao: v || null });
+  1180→  1180→    }
+  1181→  1181→  }
+  1182→  1182→
+  1183→  1183→  function commitValor(v: string) {
+  1184→  1184→    const n = num(v);
+  1185→  1185→    if (!(n >= 0)) {
+  1186→  1186→      toast.error("Valor inválido");
+  1187→  1187→      return;
+  1188→  1188→    }
+  1189→  1189→    if (n !== num(ativo.valorAquisicao)) {
+  1190→  1190→      onSalvar({ valorAquisicao: n });
+  1191→  1191→    }
+  1192→  1192→  }
+  1193→  1193→
+  1194→  1194→  function commitVida(v: string) {
+  1195→  1195→    const n = num(v);
+  1196→  1196→    if (!(n >= 0)) {
+  1197→  1197→      toast.error("Vida útil inválida");
+  1198→  1198→      return;
+  1199→  1199→    }
+  1200→  1200→    if (n !== num(ativo.vidaUtilAnos)) {
+  1201→  1201→      onSalvar({ vidaUtilAnos: n });
+  1202→  1202→    }
+  1203→  1203→  }
+  1204→  1204→
+  1205→  1205→  return (
+  1206→  1206→    <TableRow className="border-t border-[var(--border-app-subtle)] hover:bg-[var(--bg-app)]/40">
+  1207→  1207→      <TableCell className="px-4 py-1.5">
+  1208→  1208→        <Input
+  1209→  1209→          defaultValue={ativo.nome}
+  1210→  1210→          onBlur={(e) => commitNome(e.currentTarget.value)}
+  1211→  1211→          disabled={!podeEditar || salvando}
+  1212→  1212→          className={`${inputCls} ${cellInputCls} ${
+  1213→  1213→            podeEditar ? "" : "opacity-70"
+  1214→  1214→          }`}
+  1215→  1215→        />
+  1216→  1216→      </TableCell>
+  1217→  1217→      <TableCell className="px-4 py-1.5">
+  1218→  1218→        <Input
+  1219→  1219→          type="date"
+  1220→  1220→          defaultValue={ativo.dataAquisicao ?? ""}
+  1221→  1221→          onBlur={(e) => commitData(e.currentTarget.value)}
+  1222→  1222→          disabled={!podeEditar || salvando}
+  1223→  1223→          className={`${inputCls} ${cellInputCls} font-mono tabular-nums ${
+  1224→  1224→            podeEditar ? "" : "opacity-70"
+  1225→  1225→          }`}
+  1226→  1226→        />
+  1227→  1227→      </TableCell>
+  1228→  1228→      <TableCell className="px-4 py-1.5">
+  1229→  1229→        <Input
+  1230→  1230→          type="number"
+  1231→  1231→          inputMode="decimal"
+  1232→  1232→          step="0.01"
+  1233→  1233→          min="0"
+  1234→  1234→          defaultValue={ativo.valorAquisicao ?? 0}
+  1235→  1235→          onBlur={(e) => commitValor(e.currentTarget.value)}
+  1236→  1236→          disabled={!podeEditar || salvando}
+  1237→  1237→          className={`${inputCls} ${cellInputCls} text-right font-mono tabular-nums ${
+  1238→  1238→            podeEditar ? "" : "opacity-70"
+  1239→  1239→          }`}
+  1240→  1240→        />
+  1241→  1241→      </TableCell>
+  1242→  1242→      <TableCell className="px-4 py-1.5">
+  1243→  1243→        <Input
+  1244→  1244→          type="number"
+  1245→  1245→          inputMode="decimal"
+  1246→  1246→          step="1"
+  1247→  1247→          min="0"
+  1248→  1248→          defaultValue={ativo.vidaUtilAnos ?? 0}
+  1249→  1249→          onBlur={(e) => commitVida(e.currentTarget.value)}
+  1250→  1250→          disabled={!podeEditar || salvando}
+  1251→  1251→          className={`${inputCls} ${cellInputCls} text-right font-mono tabular-nums ${
+  1252→  1252→            podeEditar ? "" : "opacity-70"
+  1253→  1253→          }`}
+  1254→  1254→        />
+  1255→  1255→      </TableCell>
+  1256→  1256→      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-[var(--text-app-secondary)]">
+  1257→  1257→        {brl(dep)}
+  1258→  1258→      </TableCell>
+  1259→  1259→      <TableCell className="px-2 text-center">
+  1260→  1260→        <Button
+  1261→  1261→          type="button"
+  1262→  1262→          variant="ghost"
+  1263→  1263→          size="icon"
+  1264→  1264→          className="h-8 w-8 text-[var(--text-app-muted)] hover:text-[var(--danger-app)] hover:bg-[var(--danger-app-bg)]"
+  1265→  1265→          onClick={onRemover}
+  1266→  1266→          disabled={!podeEditar || salvando}
+  1267→  1267→          title="Remover equipamento"
+  1268→  1268→        >
+  1269→  1269→          <Trash2 size={14} />
+  1270→  1270→        </Button>
+  1271→  1271→      </TableCell>
+  1272→  1272→    </TableRow>
+  1273→  1273→  );
+  1274→  1274→}
+  1275→  1275→
+  1276→  1276→// ----------------------------------------------------------------------------
+  1277→  1277→// 4. Insumos
+  1278→  1278→// ----------------------------------------------------------------------------
+  1279→  1279→function InsumosPanel() {
+  1280→  1280→  const podeEditar = useAuth((s) => s.podeEditar());
+  1281→  1281→  const queryClient = useQueryClient();
+  1282→  1282→
+  1283→  1283→  const q = useQuery<Insumo[]>({
+  1284→  1284→    queryKey: ["insumos"],
+  1285→  1285→    queryFn: () => apiFetch<Insumo[]>("/api/insumos"),
+  1286→  1286→  });
+  1287→  1287→
+  1288→  1288→  const [busca, setBusca] = useState("");
+  1289→  1289→  const [novoNome, setNovoNome] = useState("");
+  1290→  1290→  const [novoUnidade, setNovoUnidade] = useState("un");
+  1291→  1291→  const [novoValor, setNovoValor] = useState("");
+  1292→  1292→  const [novoQtd, setNovoQtd] = useState("");
+  1293→  1293→
+  1294→  1294→  const filtrados = useMemo(() => {
+  1295→  1295→    const term = busca.trim().toLowerCase();
+  1296→  1296→    const lista = q.data ?? [];
+  1297→  1297→    if (!term) return lista;
+  1298→  1298→    return lista.filter((i) => i.nome?.toLowerCase().includes(term));
+  1299→  1299→  }, [q.data, busca]);
+  1300→  1300→
+  1301→  1301→  const addMut = useMutation({
+  1302→  1302→    mutationFn: (vars: {
+  1303→  1303→      nome: string;
+  1304→  1304→      unidade: string;
+  1305→  1305→      valorTotal: number;
+  1306→  1306→      quantidade: number;
+  1307→  1307→    }) =>
+  1308→  1308→      apiFetch<Insumo>("/api/insumos", {
+  1309→  1309→        method: "POST",
+  1310→  1310→        body: JSON.stringify(vars),
+  1311→  1311→      }),
+  1312→  1312→    onSuccess: () => {
+  1313→  1313→      queryClient.invalidateQueries({ queryKey: ["insumos"] });
+  1314→  1314→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+  1315→  1315→      setNovoNome("");
+  1316→  1316→      setNovoUnidade("un");
+  1317→  1317→      setNovoValor("");
+  1318→  1318→      setNovoQtd("");
+  1319→  1319→      toast.success("Insumo adicionado");
+  1320→  1320→    },
+  1321→  1321→    onError: (e: Error) => toast.error(e.message),
+  1322→  1322→  });
+  1323→  1323→
+  1324→  1324→  const putMut = useMutation({
+  1325→  1325→    mutationFn: (vars: {
+  1326→  1326→      id: string;
+  1327→  1327→      nome?: string;
+  1328→  1328→      unidade?: string;
+  1329→  1329→      valorTotal?: number;
+  1330→  1330→      quantidade?: number;
+  1331→  1331→    }) =>
+  1332→  1332→      apiFetch<Insumo>(`/api/insumos/${vars.id}`, {
+  1333→  1333→        method: "PUT",
+  1334→  1334→        body: JSON.stringify({
+  1335→  1335→          ...(vars.nome !== undefined ? { nome: vars.nome } : {}),
+  1336→  1336→          ...(vars.unidade !== undefined ? { unidade: vars.unidade } : {}),
+  1337→  1337→          ...(vars.valorTotal !== undefined
+  1338→  1338→            ? { valorTotal: vars.valorTotal }
+  1339→  1339→            : {}),
+  1340→  1340→          ...(vars.quantidade !== undefined
+  1341→  1341→            ? { quantidade: vars.quantidade }
+  1342→  1342→            : {}),
+  1343→  1343→        }),
+  1344→  1344→      }),
+  1345→  1345→    onSuccess: () => {
+  1346→  1346→      queryClient.invalidateQueries({ queryKey: ["insumos"] });
+  1347→  1347→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+  1348→  1348→      toast.success("Insumo atualizado");
+  1349→  1349→    },
+  1350→  1350→    onError: (e: Error) => toast.error(e.message),
+  1351→  1351→  });
+  1352→  1352→
+  1353→  1353→  const delMut = useMutation({
+  1354→  1354→    mutationFn: (id: string) =>
+  1355→  1355→      apiFetch<void>(`/api/insumos/${id}`, { method: "DELETE" }),
+  1356→  1356→    onSuccess: () => {
+  1357→  1357→      queryClient.invalidateQueries({ queryKey: ["insumos"] });
+  1358→  1358→      queryClient.invalidateQueries({ queryKey: ["resumo"] });
+  1359→  1359→      toast.success("Insumo removido");
+  1360→  1360→    },
+  1361→  1361→    onError: (e: Error) => toast.error(e.message),
+  1362→  1362→  });
+  1363→  1363→
+  1364→  1364→  function handleAdd() {
+  1365→  1365→    const nome = novoNome.trim();
+  1366→  1366→    if (!nome) {
+  1367→  1367→      toast.error("Informe o nome do insumo");
+  1368→  1368→      return;
+  1369→  1369→    }
+  1370→  1370→    addMut.mutate({
+  1371→  1371→      nome,
+  1372→  1372→      unidade: novoUnidade.trim() || "un",
+  1373→  1373→      valorTotal: num(novoValor),
+  1374→  1374→      quantidade: num(novoQtd) || 1,
+  1375→  1375→    });
+  1376→  1376→  }
+  1377→  1377→
+  1378→  1378→  return (
+  1379→  1379→    <motion.div
+  1380→  1380→      initial={{ opacity: 0, y: 4 }}
+  1381→  1381→      animate={{ opacity: 1, y: 0 }}
+  1382→  1382→      transition={{ duration: 0.2 }}
+  1383→  1383→      className="space-y-4"
+  1384→  1384→    >
+  1385→  1385→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+  1386→  1386→        <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
+  1387→  1387→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+  1388→  1388→            Catálogo de insumos e consumíveis
+  1389→  1389→          </h3>
+  1390→  1390→          <span className="text-[11px] text-[var(--text-app-muted)]">
+  1391→  1391→            {(q.data ?? []).length}{" "}
+  1392→  1392→            {(q.data ?? []).length === 1 ? "item" : "itens"}
+  1393→  1393→          </span>
+  1394→  1394→        </div>
+  1395→  1395→
+  1396→  1396→        {/* Search box */}
+  1397→  1397→        <div className="px-4 py-3 border-b border-[var(--border-app-subtle)]">
+  1398→  1398→          <div className="relative max-w-sm">
+  1399→  1399→            <Search
+  1400→  1400→              size={14}
+  1401→  1401→              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-app-muted)] pointer-events-none"
+  1402→  1402→            />
+  1403→  1403→            <Input
+  1404→  1404→              value={busca}
+  1405→  1405→              onChange={(e) => setBusca(e.target.value)}
+  1406→  1406→              placeholder="Filtrar por nome…"
+  1407→  1407→              className={`${inputCls} pl-8`}
+  1408→  1408→            />
+  1409→  1409→          </div>
+  1410→  1410→        </div>
+  1411→  1411→
+  1412→  1412→        {podeEditar && (
+  1413→  1413→          <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3">
+  1414→  1414→            <div className="lg:col-span-4">
+  1415→  1415→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1416→  1416→                Nome
+  1417→  1417→              </Label>
+  1418→  1418→              <Input
+  1419→  1419→                value={novoNome}
+  1420→  1420→                onChange={(e) => setNovoNome(e.target.value)}
+  1421→  1421→                placeholder="Ex.: Filme radiográfico…"
+  1422→  1422→                className={inputCls}
+  1423→  1423→              />
+  1424→  1424→            </div>
+  1425→  1425→            <div className="lg:col-span-2">
+  1426→  1426→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1427→  1427→                Unidade
+  1428→  1428→              </Label>
+  1429→  1429→              <Input
+  1430→  1430→                value={novoUnidade}
+  1431→  1431→                onChange={(e) => setNovoUnidade(e.target.value)}
+  1432→  1432→                placeholder="un"
+  1433→  1433→                className={inputCls}
+  1434→  1434→              />
+  1435→  1435→            </div>
+  1436→  1436→            <div className="lg:col-span-3">
+  1437→  1437→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1438→  1438→                Valor total (R$)
+  1439→  1439→              </Label>
+  1440→  1440→              <Input
+  1441→  1441→                type="number"
+  1442→  1442→                inputMode="decimal"
+  1443→  1443→                step="0.01"
+  1444→  1444→                min="0"
+  1445→  1445→                value={novoValor}
+  1446→  1446→                onChange={(e) => setNovoValor(e.target.value)}
+  1447→  1447→                placeholder="0,00"
+  1448→  1448→                className={`${inputCls} text-right font-mono tabular-nums`}
+  1449→  1449→              />
+  1450→  1450→            </div>
+  1451→  1451→            <div className="lg:col-span-2">
+  1452→  1452→              <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1453→  1453→                Quantidade
+  1454→  1454→              </Label>
+  1455→  1455→              <Input
+  1456→  1456→                type="number"
+  1457→  1457→                inputMode="decimal"
+  1458→  1458→                step="0.01"
+  1459→  1459→                min="0"
+  1460→  1460→                value={novoQtd}
+  1461→  1461→                onChange={(e) => setNovoQtd(e.target.value)}
+  1462→  1462→                placeholder="1"
+  1463→  1463→                className={`${inputCls} text-right font-mono tabular-nums`}
+  1464→  1464→              />
+  1465→  1465→            </div>
+  1466→  1466→            <div className="lg:col-span-1 flex items-end">
+  1467→  1467→              <Button
+  1468→  1468→                type="button"
+  1469→  1469→                size="sm"
+  1470→  1470→                onClick={handleAdd}
+  1471→  1471→                disabled={addMut.isPending}
+  1472→  1472→                className="w-full bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)]"
+  1473→  1473→              >
+  1474→  1474→                <Plus size={14} />
+  1475→  1475→                {addMut.isPending ? "…" : "Add"}
+  1476→  1476→              </Button>
+  1477→  1477→            </div>
+  1478→  1478→          </div>
+  1479→  1479→        )}
+  1480→  1480→
+  1481→  1481→        {q.isLoading ? (
+  1482→  1482→          <TableSkeleton cols={5} />
+  1483→  1483→        ) : q.isError ? (
+  1484→  1484→          <ErrorState
+  1485→  1485→            message={q.error?.message ?? "Falha ao carregar insumos"}
+  1486→  1486→            onRetry={() => q.refetch()}
+  1487→  1487→          />
+  1488→  1488→        ) : (q.data ?? []).length === 0 ? (
+  1489→  1489→          <EmptyState
+  1490→  1490→            icon={<Package size={22} strokeWidth={1.5} />}
+  1491→  1491→            title="Nenhum insumo cadastrado"
+  1492→  1492→            hint={
+  1493→  1493→              podeEditar
+  1494→  1494→                ? "Cadastre insumos e consumíveis para compor o custo de procedimentos."
+  1495→  1495→                : "Aguarde o gestor cadastrar o catálogo de insumos."
+  1496→  1496→            }
+  1497→  1497→          />
+  1498→  1498→        ) : filtrados.length === 0 ? (
+  1499→  1499→          <EmptyState
+  1500→  1500→            icon={<Inbox size={22} strokeWidth={1.5} />}
+  1501→  1501→            title="Nenhum insumo encontrado"
+  1502→  1502→            hint={`Nada corresponde a "${busca}". Tente outro termo.`}
+  1503→  1503→          />
+  1504→  1504→        ) : (
+  1505→  1505→          <div className="max-h-96 overflow-y-auto scroll-thin">
+  1506→  1506→            <Table className="text-sm">
+  1507→  1507→              <TableHeader>
+  1508→  1508→                <TableRow className="border-[var(--border-app)] hover:bg-transparent">
+  1509→  1509→                  <TableHead className="text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2">
+  1510→  1510→                    Item
+  1511→  1511→                  </TableHead>
+  1512→  1512→                  <TableHead className="text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-24">
+  1513→  1513→                    Unidade
+  1514→  1514→                  </TableHead>
+  1515→  1515→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-32">
+  1516→  1516→                    Valor total (R$)
+  1517→  1517→                  </TableHead>
+  1518→  1518→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-28">
+  1519→  1519→                    Quantidade
+  1520→  1520→                  </TableHead>
+  1521→  1521→                  <TableHead className="text-right text-[var(--text-app-muted)] text-[11px] uppercase tracking-wide font-normal px-4 py-2 w-32">
+  1522→  1522→                    Custo unitário
+  1523→  1523→                  </TableHead>
+  1524→  1524→                  <TableHead className="w-12 px-2" />
+  1525→  1525→                </TableRow>
+  1526→  1526→              </TableHeader>
+  1527→  1527→              <TableBody>
+  1528→  1528→                {filtrados.map((it) => (
+  1529→  1529→                  <InsumoRow
+  1530→  1530→                    key={it.id}
+  1531→  1531→                    insumo={it}
+  1532→  1532→                    podeEditar={podeEditar}
+  1533→  1533→                    onSalvar={(vars) => putMut.mutate({ id: it.id, ...vars })}
+  1534→  1534→                    onRemover={() => delMut.mutate(it.id)}
+  1535→  1535→                    salvando={putMut.isPending && putMut.variables?.id === it.id}
+  1536→  1536→                  />
+  1537→  1537→                ))}
+  1538→  1538→              </TableBody>
+  1539→  1539→            </Table>
+  1540→  1540→          </div>
+  1541→  1541→        )}
+  1542→  1542→      </Card>
+  1543→  1543→
+  1544→  1544→      <p className="text-[11px] text-[var(--text-app-muted)] px-1">
+  1545→  1545→        Custo unitário = valor total ÷ quantidade. Usado para calcular o custo
+  1546→  1546→        de insumos consumidos em cada procedimento.
+  1547→  1547→      </p>
+  1548→  1548→    </motion.div>
+  1549→  1549→  );
+  1550→  1550→}
+  1551→  1551→
+  1552→  1552→function InsumoRow({
+  1553→  1553→  insumo,
+  1554→  1554→  podeEditar,
+  1555→  1555→  onSalvar,
+  1556→  1556→  onRemover,
+  1557→  1557→  salvando,
+  1558→  1558→}: {
+  1559→  1559→  insumo: Insumo;
+  1560→  1560→  podeEditar: boolean;
+  1561→  1561→  onSalvar: (vars: {
+  1562→  1562→    nome?: string;
+  1563→  1563→    unidade?: string;
+  1564→  1564→    valorTotal?: number;
+  1565→  1565→    quantidade?: number;
+  1566→  1566→  }) => void;
+  1567→  1567→  onRemover: () => void;
+  1568→  1568→  salvando: boolean;
+  1569→  1569→}) {
+  1570→  1570→  // Uncontrolled inputs; parent uses `key={insumo.id}` to remount when row id changes.
+  1571→  1571→  function commitNome(v: string) {
+  1572→  1572→    const n = v.trim();
+  1573→  1573→    if (!n) {
+  1574→  1574→      toast.error("Nome não pode ser vazio");
+  1575→  1575→      return;
+  1576→  1576→    }
+  1577→  1577→    if (n !== insumo.nome) onSalvar({ nome: n });
+  1578→  1578→  }
+  1579→  1579→
+  1580→  1580→  function commitUnidade(v: string) {
+  1581→  1581→    const u = v.trim() || "un";
+  1582→  1582→    if (u !== (insumo.unidade ?? "")) onSalvar({ unidade: u });
+  1583→  1583→  }
+  1584→  1584→
+  1585→  1585→  function commitValor(v: string) {
+  1586→  1586→    const n = num(v);
+  1587→  1587→    if (!(n >= 0)) {
+  1588→  1588→      toast.error("Valor inválido");
+  1589→  1589→      return;
+  1590→  1590→    }
+  1591→  1591→    if (n !== num(insumo.valorTotal)) onSalvar({ valorTotal: n });
+  1592→  1592→  }
+  1593→  1593→
+  1594→  1594→  function commitQtd(v: string) {
+  1595→  1595→    const n = num(v);
+  1596→  1596→    if (!(n >= 0)) {
+  1597→  1597→      toast.error("Quantidade inválida");
+  1598→  1598→      return;
+  1599→  1599→    }
+  1600→  1600→    if (n !== num(insumo.quantidade)) onSalvar({ quantidade: n });
+  1601→  1601→  }
+  1602→  1602→
+  1603→  1603→  const custo =
+  1604→  1604→    num(insumo.quantidade) > 0
+  1605→  1605→      ? num(insumo.valorTotal) / num(insumo.quantidade)
+  1606→  1606→      : 0;
+  1607→  1607→
+  1608→  1608→  return (
+  1609→  1609→    <TableRow className="border-t border-[var(--border-app-subtle)] hover:bg-[var(--bg-app)]/40">
+  1610→  1610→      <TableCell className="px-4 py-1.5">
+  1611→  1611→        <Input
+  1612→  1612→          defaultValue={insumo.nome}
+  1613→  1613→          onBlur={(e) => commitNome(e.currentTarget.value)}
+  1614→  1614→          disabled={!podeEditar || salvando}
+  1615→  1615→          className={`${inputCls} ${cellInputCls} ${
+  1616→  1616→            podeEditar ? "" : "opacity-70"
+  1617→  1617→          }`}
+  1618→  1618→        />
+  1619→  1619→      </TableCell>
+  1620→  1620→      <TableCell className="px-4 py-1.5">
+  1621→  1621→        <Input
+  1622→  1622→          defaultValue={insumo.unidade ?? ""}
+  1623→  1623→          onBlur={(e) => commitUnidade(e.currentTarget.value)}
+  1624→  1624→          disabled={!podeEditar || salvando}
+  1625→  1625→          className={`${inputCls} ${cellInputCls} text-center ${
+  1626→  1626→            podeEditar ? "" : "opacity-70"
+  1627→  1627→          }`}
+  1628→  1628→        />
+  1629→  1629→      </TableCell>
+  1630→  1630→      <TableCell className="px-4 py-1.5">
+  1631→  1631→        <Input
+  1632→  1632→          type="number"
+  1633→  1633→          inputMode="decimal"
+  1634→  1634→          step="0.01"
+  1635→  1635→          min="0"
+  1636→  1636→          defaultValue={insumo.valorTotal ?? 0}
+  1637→  1637→          onBlur={(e) => commitValor(e.currentTarget.value)}
+  1638→  1638→          disabled={!podeEditar || salvando}
+  1639→  1639→          className={`${inputCls} ${cellInputCls} text-right font-mono tabular-nums ${
+  1640→  1640→            podeEditar ? "" : "opacity-70"
+  1641→  1641→          }`}
+  1642→  1642→        />
+  1643→  1643→      </TableCell>
+  1644→  1644→      <TableCell className="px-4 py-1.5">
+  1645→  1645→        <Input
+  1646→  1646→          type="number"
+  1647→  1647→          inputMode="decimal"
+  1648→  1648→          step="0.01"
+  1649→  1649→          min="0"
+  1650→  1650→          defaultValue={insumo.quantidade ?? 0}
+  1651→  1651→          onBlur={(e) => commitQtd(e.currentTarget.value)}
+  1652→  1652→          disabled={!podeEditar || salvando}
+  1653→  1653→          className={`${inputCls} ${cellInputCls} text-right font-mono tabular-nums ${
+  1654→  1654→            podeEditar ? "" : "opacity-70"
+  1655→  1655→          }`}
+  1656→  1656→        />
+  1657→  1657→      </TableCell>
+  1658→  1658→      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-[var(--text-app-secondary)]">
+  1659→  1659→        {brl(custo)}
+  1660→  1660→      </TableCell>
+  1661→  1661→      <TableCell className="px-2 text-center">
+  1662→  1662→        <Button
+  1663→  1663→          type="button"
+  1664→  1664→          variant="ghost"
+  1665→  1665→          size="icon"
+  1666→  1666→          className="h-8 w-8 text-[var(--text-app-muted)] hover:text-[var(--danger-app)] hover:bg-[var(--danger-app-bg)]"
+  1667→  1667→          onClick={onRemover}
+  1668→  1668→          disabled={!podeEditar || salvando}
+  1669→  1669→          title="Remover insumo"
+  1670→  1670→        >
+  1671→  1671→          <Trash2 size={14} />
+  1672→  1672→        </Button>
+  1673→  1673→      </TableCell>
+  1674→  1674→    </TableRow>
+  1675→  1675→  );
+  1676→  1676→}
+  1677→  1677→
+  1678→  1678→// ----------------------------------------------------------------------------
+  1679→  1679→// Resumo fetcher (returns null when capacidade is missing — HTTP 400)
+  1680→  1680→// ----------------------------------------------------------------------------
+  1681→  1681→async function fetchResumo(): Promise<Resumo | null> {
+  1682→  1682→  const token = useAuth.getState().token;
+  1683→  1683→  const res = await fetch("/api/resumo", {
+  1684→  1684→    headers: {
+  1685→  1685→      "Content-Type": "application/json",
+  1686→  1686→      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  1687→  1687→    },
+  1688→  1688→  });
+  1689→  1689→  if (res.status === 400) return null; // capacidade not configured — not an error
+  1690→  1690→  const body = await res.json().catch(() => null);
+  1691→  1691→  if (!res.ok) {
+  1692→  1692→    const erro =
+  1693→  1693→      (body && (body.erro || body.error || body.message)) ||
+  1694→  1694→      `Erro ${res.status}`;
+  1695→  1695→    throw new Error(erro);
+  1696→  1696→  }
+  1697→  1697→  return body as Resumo;
+  1698→  1698→}
+  1699→  1699→
+  1700→  1700→// ----------------------------------------------------------------------------
+  1701→  1701→// Summary card at the top of the tab
+  1702→  1702→// ----------------------------------------------------------------------------
+  1703→  1703→function ResumoCard() {
+  1704→  1704→  const q = useQuery<Resumo | null>({
+  1705→  1705→    queryKey: ["resumo"],
+  1706→  1706→    queryFn: fetchResumo,
+  1707→  1707→  });
+  1708→  1708→
+  1709→  1709→  if (q.isLoading) {
+  1710→  1710→    return (
+  1711→  1711→      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+  1712→  1712→        {Array.from({ length: 4 }).map((_, i) => (
+  1713→  1713→          <Skeleton
+  1714→  1714→            key={i}
+  1715→  1715→            className="h-20 bg-[var(--bg-app-alt-strong)] rounded-xl"
+  1716→  1716→          />
+  1717→  1717→        ))}
+  1718→  1718→      </div>
+  1719→  1719→    );
+  1720→  1720→  }
+  1721→  1721→
+  1722→  1722→  if (q.isError) {
+  1723→  1723→    return (
+  1724→  1724→      <Card className="bg-[var(--danger-app-bg)] border-[var(--danger-app-border)] py-0 shadow-none">
+  1725→  1725→        <div className="px-4 py-3 flex items-start gap-3">
+  1726→  1726→          <AlertTriangle
+  1727→  1727→            size={18}
+  1728→  1728→            className="text-[var(--danger-app)] shrink-0 mt-0.5"
+  1729→  1729→            strokeWidth={1.75}
+  1730→  1730→          />
+  1731→  1731→          <div className="text-sm">
+  1732→  1732→            <div className="font-medium text-[var(--danger-app)]">
+  1733→  1733→              Não foi possível carregar o resumo
+  1734→  1734→            </div>
+  1735→  1735→            <div className="text-xs text-[var(--danger-app)] mt-0.5">
+  1736→  1736→              {q.error?.message ?? "Tente novamente mais tarde."}
+  1737→  1737→            </div>
+  1738→  1738→          </div>
+  1739→  1739→        </div>
+  1740→  1740→      </Card>
+  1741→  1741→    );
+  1742→  1742→  }
+  1743→  1743→
+  1744→  1744→  if (q.data === null) {
+  1745→  1745→    return (
+  1746→  1746→      <Card className="bg-[var(--warning-app-bg)] border-[var(--warning-app-border)] py-0 shadow-none">
+  1747→  1747→        <div className="px-4 py-3 flex items-start gap-3">
+  1748→  1748→          <AlertTriangle
+  1749→  1749→            size={18}
+  1750→  1750→            className="text-[var(--warning-app)] shrink-0 mt-0.5"
+  1751→  1751→            strokeWidth={1.75}
+  1752→  1752→          />
+  1753→  1753→          <div className="text-sm">
+  1754→  1754→            <div className="font-medium text-[var(--warning-app-strong)]">
+  1755→  1755→              Configure a capacidade produtiva
+  1756→  1756→            </div>
+  1757→  1757→            <div className="text-xs text-[var(--warning-app)] mt-0.5">
+  1758→  1758→              Sem a capacidade produtiva configurada não é possível calcular o
+  1759→  1759→              custo fixo por minuto. Acesse a sub-aba “Capacidade produtiva”
+  1760→  1760→              abaixo para começar.
+  1761→  1761→            </div>
+  1762→  1762→          </div>
+  1763→  1763→        </div>
+  1764→  1764→      </Card>
+  1765→  1765→    );
+  1766→  1766→  }
+  1767→  1767→
+  1768→  1768→  const r = q.data;
+  1769→  1769→  return (
+  1770→  1770→    <motion.div
+  1771→  1771→      initial={{ opacity: 0, y: 4 }}
+  1772→  1772→      animate={{ opacity: 1, y: 0 }}
+  1773→  1773→      transition={{ duration: 0.25 }}
+  1774→  1774→      className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+  1775→  1775→    >
+  1776→  1776→      <StatCard
+  1777→  1777→        label="Custo fixo total / mês"
+  1778→  1778→        value={brl(r.custoFixoTotal)}
+  1779→  1779→        sub={
+  1780→  1780→          r.depreciacaoMensalTotal > 0
+  1781→  1781→            ? `inclui ${brl(r.depreciacaoMensalTotal)} de depreciação`
+  1782→  1782→            : undefined
+  1783→  1783→        }
+  1784→  1784→        icon={<Wallet size={16} strokeWidth={1.75} />}
+  1785→  1785→      />
+  1786→  1786→      <StatCard
+  1787→  1787→        label="Depreciação mensal"
+  1788→  1788→        value={brl(r.depreciacaoMensalTotal)}
+  1789→  1789→        icon={<Package size={16} strokeWidth={1.75} />}
+  1790→  1790→      />
+  1791→  1791→      <StatCard
+  1792→  1792→        label="Horas efetivas / mês"
+  1793→  1793→        value={`${(r.horasEfetivas ?? 0).toFixed(0)}h`}
+  1794→  1794→        icon={<Timer size={16} strokeWidth={1.75} />}
+  1795→  1795→      />
+  1796→  1796→      <StatCard
+  1797→  1797→        label="Custo fixo / minuto"
+  1798→  1798→        value={brl(r.custoFixoPorMinuto)}
+  1799→  1799→        icon={<Gauge size={16} strokeWidth={1.75} />}
+  1800→  1800→        accent
+  1801→  1801→      />
+  1802→  1802→    </motion.div>
+  1803→  1803→  );
+  1804→  1804→}
+  1805→  1805→
+  1806→  1806→// ----------------------------------------------------------------------------
+  1807→  1807→// Main exported component — 4 sub-panels via internal Tabs
+  1808→  1808→// ----------------------------------------------------------------------------
+  1809→  1809→export function CustosCapacidadeTab() {
+  1810→  1810→  return (
+  1811→  1811→    <div className="h-full overflow-y-auto scroll-thin">
+  1812→  1812→      <div className="p-4 sm:p-6 space-y-5">
+  1813→  1813→        <ResumoCard />
+  1814→  1814→
+  1815→  1815→        <Tabs defaultValue="despesas" className="gap-4">
+  1816→  1816→          <TabsList className="bg-[var(--bg-app-alt-strong)] p-1 h-auto flex-wrap">
+  1817→  1817→            <TabsTrigger
+  1818→  1818→              value="despesas"
+  1819→  1819→              className="data-[state=active]:bg-[var(--surface-app)] data-[state=active]:text-[var(--accent-app-text)] data-[state=active]:shadow-sm text-[var(--text-app-muted)] hover:text-[var(--text-app)] text-xs sm:text-sm"
+  1820→  1820→            >
+  1821→  1821→              Despesas fixas
+  1822→  1822→            </TabsTrigger>
+  1823→  1823→            <TabsTrigger
+  1824→  1824→              value="capacidade"
+  1825→  1825→              className="data-[state=active]:bg-[var(--surface-app)] data-[state=active]:text-[var(--accent-app-text)] data-[state=active]:shadow-sm text-[var(--text-app-muted)] hover:text-[var(--text-app)] text-xs sm:text-sm"
+  1826→  1826→            >
+  1827→  1827→              Capacidade produtiva
+  1828→  1828→            </TabsTrigger>
+  1829→  1829→            <TabsTrigger
+  1830→  1830→              value="ativos"
+  1831→  1831→              className="data-[state=active]:bg-[var(--surface-app)] data-[state=active]:text-[var(--accent-app-text)] data-[state=active]:shadow-sm text-[var(--text-app-muted)] hover:text-[var(--text-app)] text-xs sm:text-sm"
+  1832→  1832→            >
+  1833→  1833→              Equipamentos &amp; imobilizado
+  1834→  1834→            </TabsTrigger>
+  1835→  1835→            <TabsTrigger
+  1836→  1836→              value="insumos"
+  1837→  1837→              className="data-[state=active]:bg-[var(--surface-app)] data-[state=active]:text-[var(--accent-app-text)] data-[state=active]:shadow-sm text-[var(--text-app-muted)] hover:text-[var(--text-app)] text-xs sm:text-sm"
+  1838→  1838→            >
+  1839→  1839→              Insumos
+  1840→  1840→            </TabsTrigger>
+  1841→  1841→          </TabsList>
+  1842→  1842→
+  1843→  1843→          <TabsContent value="despesas" className="outline-none">
+  1844→  1844→            <DespesasPanel />
+  1845→  1845→          </TabsContent>
+  1846→  1846→          <TabsContent value="capacidade" className="outline-none">
+  1847→  1847→            <CapacidadePanel />
+  1848→  1848→          </TabsContent>
+  1849→  1849→          <TabsContent value="ativos" className="outline-none">
+  1850→  1850→            <AtivosPanel />
+  1851→  1851→          </TabsContent>
+  1852→  1852→          <TabsContent value="insumos" className="outline-none">
+  1853→  1853→            <InsumosPanel />
+  1854→  1854→          </TabsContent>
+  1855→  1855→        </Tabs>
+  1856→  1856→      </div>
+  1857→  1857→    </div>
+  1858→  1858→  );
+  1859→  1859→}
+  1860→  1860→

@@ -1,0 +1,1523 @@
+     1→import { useState, useEffect, useCallback, useRef } from "react";
+     2→import { Plus, Trash2, Activity, Clock, Package, Stethoscope, Calculator, TrendingUp, TrendingDown, AlertCircle, Loader2, LayoutDashboard, Printer, CalendarDays, ChevronLeft, ChevronRight, ArrowRight, Sun, Moon, Wallet } from "lucide-react";
+     3→import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from "recharts";
+     4→import FinanceiroModule from "./FinanceiroModule.jsx";
+     5→
+     6→// ---------- helpers ----------
+     7→const brl = (n) =>
+     8→  isFinite(n)
+     9→    ? Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+    10→    : "—";
+    11→const pct = (n) => (isFinite(n) ? `${(Number(n) * 100).toFixed(1)}%` : "—");
+    12→const num = (v) => (v === null || v === undefined || v === "" ? 0 : Number(v));
+    13→
+    14→const STATUS_AGENDAMENTO = {
+    15→  aguardando: { label: "Aguardando chegar", classe: "bg-[var(--bg-alt-strong)] text-[var(--text-secondary)]" },
+    16→  atendido: { label: "Atendido", classe: "bg-[var(--accent-soft-bg-strong)] text-[var(--accent-text)]" },
+    17→  faltou: { label: "Faltou", classe: "bg-[var(--danger-bg-strong)] text-[var(--danger)]" },
+    18→  desmarcou: { label: "Desmarcou", classe: "bg-[var(--bg-alt-strong)] text-[var(--text-muted)]" },
+    19→  remarcado: { label: "Remarcado", classe: "bg-[var(--warning-bg-strong)] text-[var(--warning)]" },
+    20→};
+    21→
+    22→// ---------- small UI atoms ----------
+    23→function NumInput({ value, onChange, onBlur, prefix, suffix, step = "1", className = "", disabled }) {
+    24→  return (
+    25→    <div className={`flex items-center gap-1 ${className}`}>
+    26→      {prefix && <span className="text-xs text-[var(--text-faint)] font-mono">{prefix}</span>}
+    27→      <input
+    28→        type="number"
+    29→        step={step}
+    30→        value={value}
+    31→        disabled={disabled}
+    32→        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+    33→        onBlur={onBlur}
+    34→        className="w-full bg-transparent border-b border-[var(--border-strong)] focus:border-[var(--accent-text)] outline-none text-right font-mono text-sm py-0.5 px-1 tabular-nums disabled:text-[var(--text-faint)] disabled:cursor-not-allowed"
+    35→      />
+    36→      {suffix && <span className="text-xs text-[var(--text-faint)] font-mono">{suffix}</span>}
+    37→    </div>
+    38→  );
+    39→}
+    40→
+    41→function TextInput({ value, onChange, onBlur, className = "", disabled }) {
+    42→  return (
+    43→    <input
+    44→      type="text"
+    45→      value={value}
+    46→      disabled={disabled}
+    47→      onChange={(e) => onChange(e.target.value)}
+    48→      onBlur={onBlur}
+    49→      className={`w-full bg-transparent border-b border-[var(--border-strong)] focus:border-[var(--accent-text)] outline-none text-sm py-0.5 px-1 disabled:text-[var(--text-faint)] disabled:cursor-not-allowed ${className}`}
+    50→    />
+    51→  );
+    52→}
+    53→
+    54→// ---------- tema (claro/escuro + cor de destaque) ----------
+    55→function useTema() {
+    56→  const [escuro, setEscuro] = useState(() => {
+    57→    try {
+    58→      return localStorage.getItem("temaEscuro") === "1";
+    59→    } catch {
+    60→      return false;
+    61→    }
+    62→  });
+    63→  const [cor, setCor] = useState(() => {
+    64→    try {
+    65→      return localStorage.getItem("corDestaque") || "teal";
+    66→    } catch {
+    67→      return "teal";
+    68→    }
+    69→  });
+    70→
+    71→  useEffect(() => {
+    72→    document.documentElement.classList.toggle("dark", escuro);
+    73→    document.documentElement.dataset.accent = cor;
+    74→    try {
+    75→      localStorage.setItem("temaEscuro", escuro ? "1" : "0");
+    76→      localStorage.setItem("corDestaque", cor);
+    77→    } catch {}
+    78→  }, [escuro, cor]);
+    79→
+    80→  return { escuro, setEscuro, cor, setCor };
+    81→}
+    82→
+    83→const CORES_DISPONIVEIS = [
+    84→  { id: "teal", swatch: "#0f766e" },
+    85→  { id: "blue", swatch: "#1d4ed8" },
+    86→  { id: "purple", swatch: "#7e22ce" },
+    87→];
+    88→
+    89→function SeletorDeTema({ escuro, setEscuro, cor, setCor }) {
+    90→  const [aberto, setAberto] = useState(false);
+    91→  return (
+    92→    <div className="relative">
+    93→      <IconBtn onClick={() => setAberto((a) => !a)} title="Tema">
+    94→        {escuro ? <Moon size={15} /> : <Sun size={15} />}
+    95→      </IconBtn>
+    96→      {aberto && (
+    97→        <>
+    98→          <div className="fixed inset-0 z-10" onClick={() => setAberto(false)} />
+    99→          <div className="absolute right-0 top-full mt-2 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg p-3 w-48">
+   100→            <button
+   101→              onClick={() => setEscuro((e) => !e)}
+   102→              className="w-full flex items-center justify-between text-xs text-[var(--text-secondary)] hover:text-[var(--text)] mb-3"
+   103→            >
+   104→              <span className="flex items-center gap-1.5">
+   105→                {escuro ? <Moon size={13} /> : <Sun size={13} />} {escuro ? "Escuro" : "Claro"}
+   106→              </span>
+   107→              <span className={`w-8 h-4 rounded-full relative transition-colors ${escuro ? "bg-[var(--accent)]" : "bg-[var(--bg-alt-strong)]"}`}>
+   108→                <span className={`absolute top-0.5 w-3 h-3 bg-[var(--surface)] rounded-full transition-transform ${escuro ? "translate-x-4" : "translate-x-0.5"}`} />
+   109→              </span>
+   110→            </button>
+   111→            <div className="text-[11px] uppercase tracking-wide text-[var(--text-faint)] mb-1.5">Cor de destaque</div>
+   112→            <div className="flex gap-2">
+   113→              {CORES_DISPONIVEIS.map((c) => (
+   114→                <button
+   115→                  key={c.id}
+   116→                  onClick={() => setCor(c.id)}
+   117→                  title={c.id}
+   118→                  style={{ background: c.swatch }}
+   119→                  className={`w-6 h-6 rounded-full ${cor === c.id ? "ring-2 ring-offset-2 ring-[var(--text)]" : ""}`}
+   120→                />
+   121→              ))}
+   122→            </div>
+   123→          </div>
+   124→        </>
+   125→      )}
+   126→    </div>
+   127→  );
+   128→}
+   129→
+   130→function IconBtn({ onClick, title, disabled, children }) {
+   131→  return (
+   132→    <button
+   133→      onClick={onClick}
+   134→      title={title}
+   135→      disabled={disabled}
+   136→      className="text-[var(--text-faint)] hover:text-[var(--danger)] disabled:opacity-30 disabled:hover:text-[var(--text-faint)] disabled:cursor-not-allowed transition-colors p-1 rounded"
+   137→    >
+   138→      {children}
+   139→    </button>
+   140→  );
+   141→}
+   142→
+   143→function StatCard({ label, value, sub, accent }) {
+   144→  return (
+   145→    <div className="border border-[var(--border)] rounded-lg px-4 py-3 bg-[var(--surface)]">
+   146→      <div className="text-[11px] uppercase tracking-wide text-[var(--text-faint)] mb-1">{label}</div>
+   147→      <div className={`text-2xl font-mono tabular-nums ${accent || "text-[var(--text)]"}`}>{value}</div>
+   148→      {sub && <div className="text-xs text-[var(--text-faint)] mt-0.5">{sub}</div>}
+   149→    </div>
+   150→  );
+   151→}
+   152→
+   153→// ---------- configuração vinda do processo Electron (via query string) ----------
+   154→const params = new URLSearchParams(window.location.search);
+   155→const MODO_INSTALACAO = params.get("modo") || "servidor"; // "servidor" | "cliente"
+   156→const API_BASE = params.get("apiBase") || ""; // vazio = mesma origem (modo servidor)
+   157→const ENDERECO_REDE = params.get("enderecoRede") || null; // só existe no modo servidor
+   158→
+   159→// ---------- API client ----------
+   160→function useApi(token) {
+   161→  return useCallback(
+   162→    async (path, options = {}) => {
+   163→      const res = await fetch(`${API_BASE}/api${path}`, {
+   164→        ...options,
+   165→        headers: {
+   166→          "Content-Type": "application/json",
+   167→          Authorization: `Bearer ${token}`,
+   168→          ...(options.headers || {}),
+   169→        },
+   170→      });
+   171→      if (!res.ok) {
+   172→        let msg = `Erro ${res.status}`;
+   173→        try {
+   174→          const body = await res.json();
+   175→          if (body.erro) msg = body.erro;
+   176→        } catch (_) {}
+   177→        const erro = new Error(msg);
+   178→        erro.status = res.status;
+   179→        throw erro;
+   180→      }
+   181→      if (res.status === 204) return null;
+   182→      const texto = await res.text();
+   183→      return texto ? JSON.parse(texto) : null; // algumas rotas respondem "criado com sucesso" sem corpo nenhum
+   184→    },
+   185→    [token]
+   186→  );
+   187→}
+   188→
+   189→// ---------- login / cadastro ----------
+   190→function AuthScreen({ onAutenticado }) {
+   191→  const { escuro, setEscuro, cor, setCor } = useTema();
+   192→  const [modo, setModo] = useState("login");
+   193→  const [clinicaNome, setClinicaNome] = useState("Minha Clínica");
+   194→  const [usuarioNome, setUsuarioNome] = useState("");
+   195→  const [email, setEmail] = useState(() => {
+   196→    try {
+   197→      return localStorage.getItem("ultimoEmail") || "";
+   198→    } catch {
+   199→      return "";
+   200→    }
+   201→  });
+   202→  const [senha, setSenha] = useState("");
+   203→  const [carregando, setCarregando] = useState(false);
+   204→  const [erro, setErro] = useState(null);
+   205→
+   206→  const erroDeConexao = (e) => e.message;
+   207→
+   208→  async function enviar() {
+   209→    setCarregando(true);
+   210→    setErro(null);
+   211→    try {
+   212→      const path = modo === "login" ? "/auth/login" : "/auth/registrar";
+   213→      const body = modo === "login" ? { email, senha } : { clinicaNome, usuarioNome, email, senha };
+   214→      const res = await fetch(`${API_BASE}/api${path}`, {
+   215→        method: "POST",
+   216→        headers: { "Content-Type": "application/json" },
+   217→        body: JSON.stringify(body),
+   218→      });
+   219→      const data = await res.json().catch(() => ({}));
+   220→      if (!res.ok) throw new Error(data.erro || `Erro ${res.status}`);
+   221→      try {
+   222→        localStorage.setItem("ultimoEmail", email); // só o e-mail, nunca a senha
+   223→      } catch {}
+   224→      onAutenticado({ token: data.token, usuario: data.usuario, clinica: data.clinica });
+   225→    } catch (e) {
+   226→      setErro(erroDeConexao(e));
+   227→    } finally {
+   228→      setCarregando(false);
+   229→    }
+   230→  }
+   231→
+   232→  return (
+   233→    <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-6" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+   234→      <div className="max-w-md w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
+   235→        <div className="flex items-center justify-between gap-2 mb-1">
+   236→          <div className="flex items-center gap-2">
+   237→            <Activity size={18} className="text-[var(--accent-text)]" strokeWidth={1.5} />
+   238→            <div className="text-[11px] uppercase tracking-wide text-[var(--accent-text)] font-medium">Precificação clínica</div>
+   239→          </div>
+   240→          <SeletorDeTema escuro={escuro} setEscuro={setEscuro} cor={cor} setCor={setCor} />
+   241→        </div>
+   242→        <h1 className="text-lg font-medium text-[var(--text)] mb-5">{modo === "login" ? "Entrar" : "Criar conta e clínica"}</h1>
+   243→
+   244→        <div className="flex gap-1 mb-4 border-b border-[var(--border)]">
+   245→          {["login", "registrar"].map((m) => (
+   246→            <button
+   247→              key={m}
+   248→              onClick={() => setModo(m)}
+   249→              className={`px-3 py-2 text-sm border-b-2 -mb-px ${
+   250→                modo === m ? "border-[var(--accent-text)] text-[var(--accent-text-hover)] font-medium" : "border-transparent text-[var(--text-faint)]"
+   251→              }`}
+   252→            >
+   253→              {m === "login" ? "Já tenho conta" : "Nova clínica"}
+   254→            </button>
+   255→          ))}
+   256→        </div>
+   257→
+   258→        {modo === "registrar" && (
+   259→          <>
+   260→            <label className="text-xs text-[var(--text-faint)] block mb-1">Nome da clínica</label>
+   261→            <TextInput value={clinicaNome} onChange={setClinicaNome} className="mb-3" />
+   262→            <label className="text-xs text-[var(--text-faint)] block mb-1">Seu nome</label>
+   263→            <TextInput value={usuarioNome} onChange={setUsuarioNome} className="mb-3" />
+   264→          </>
+   265→        )}
+   266→        <label className="text-xs text-[var(--text-faint)] block mb-1">E-mail</label>
+   267→        <TextInput value={email} onChange={setEmail} className="mb-3" />
+   268→        <label className="text-xs text-[var(--text-faint)] block mb-1">Senha {modo === "registrar" && "(mínimo 8 caracteres)"}</label>
+   269→        <input
+   270→          type="password"
+   271→          value={senha}
+   272→          onChange={(e) => setSenha(e.target.value)}
+   273→          className="w-full bg-transparent border-b border-[var(--border-strong)] focus:border-[var(--accent-text)] outline-none text-sm py-1 px-1 mb-4"
+   274→        />
+   275→
+   276→        <button
+   277→          onClick={enviar}
+   278→          disabled={carregando || !email || !senha || (modo === "registrar" && (!clinicaNome || !usuarioNome))}
+   279→          className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm rounded-md py-2 flex items-center justify-center gap-2 disabled:opacity-60"
+   280→        >
+   281→          {carregando && <Loader2 size={14} className="animate-spin" />}
+   282→          {modo === "login" ? "Entrar" : "Criar conta"}
+   283→        </button>
+   284→
+   285→        {erro && (
+   286→          <div className="mt-4 flex gap-2 text-xs text-[var(--danger)] bg-[var(--danger-bg)] border border-[var(--danger-border)] rounded-md p-3">
+   287→            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+   288→            <span>{erro}</span>
+   289→          </div>
+   290→        )}
+   291→
+   292→        <p className="text-xs text-[var(--text-faint)] mt-5">
+   293→          Seus dados ficam salvos neste computador. O login não persiste se você fechar o programa — é preciso entrar de novo a cada abertura.
+   294→        </p>
+   295→      </div>
+   296→    </div>
+   297→  );
+   298→}
+   299→
+   300→// ---------- main connected app ----------
+   301→function ConnectedApp({ sessao, onSair }) {
+   302→  const { token, usuario, clinica } = sessao;
+   303→  const api = useApi(token);
+   304→  const { escuro, setEscuro, cor, setCor } = useTema();
+   305→  const somenteLeitura = usuario.papel === "recepcao";
+   306→  const [tab, setTab] = useState(MODO_INSTALACAO === "cliente" ? "insumos" : "custos");
+   307→  const [carregandoInicial, setCarregandoInicial] = useState(true);
+   308→  const [erroGlobal, setErroGlobal] = useState(null);
+   309→
+   310→  const [despesas, setDespesas] = useState([]);
+   311→  const [ativos, setAtivos] = useState([]);
+   312→  const [agendamentos, setAgendamentos] = useState([]);
+   313→  const [dataAgenda, setDataAgenda] = useState(() => new Date().toISOString().slice(0, 10));
+   314→  const [carregandoAgenda, setCarregandoAgenda] = useState(false);
+   315→  const [novoAgendamento, setNovoAgendamento] = useState(null); // objeto do formulário, ou null se fechado
+   316→  const [capacidade, setCapacidade] = useState(null);
+   317→  const [insumos, setInsumos] = useState([]);
+   318→  const [procedimentos, setProcedimentos] = useState([]);
+   319→  const [resumo, setResumo] = useState(null);
+   320→  const [selectedProc, setSelectedProc] = useState(null);
+   321→  const [calc, setCalc] = useState(null);
+   322→  const [calculos, setCalculos] = useState({}); // id -> calc, usado só pros ícones de tendência na lista
+   323→
+   324→  const avisar = (e) => {
+   325→    if (e && e.status === 401) {
+   326→      onSair(); // sessão expirou ou token ficou inválido — manda de volta pro login
+   327→      return;
+   328→    }
+   329→    setErroGlobal(typeof e === "string" ? e : e.message || "Erro inesperado.");
+   330→  };
+   331→
+   332→  // ---- carga inicial ----
+   333→  useEffect(() => {
+   334→    (async () => {
+   335→      try {
+   336→        const [d, c, i, p, a] = await Promise.all([
+   337→          api("/despesas"),
+   338→          api("/capacidade"),
+   339→          api("/insumos"),
+   340→          api("/procedimentos"),
+   341→          api("/ativos"),
+   342→        ]);
+   343→        setDespesas(d);
+   344→        setCapacidade(
+   345→          c || { dias_trabalhados: 24, horas_por_dia: 8, unidades_renda: 1, percent_ocupacao: 0.75 }
+   346→        );
+   347→        setInsumos(i);
+   348→        setProcedimentos(p);
+   349→        setAtivos(a);
+   350→        if (p[0]) setSelectedProc(p[0].id);
+   351→      } catch (e) {
+   352→        avisar(e);
+   353→      } finally {
+   354→        setCarregandoInicial(false);
+   355→      }
+   356→    })();
+   357→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   358→  }, [token]);
+   359→
+   360→  // ---- resumo (custo fixo/minuto) recarrega sempre que despesas ou capacidade mudam de verdade ----
+   361→  const recarregarResumo = useCallback(async () => {
+   362→    try {
+   363→      setResumo(await api("/resumo"));
+   364→    } catch (e) {
+   365→      setResumo(null); // capacidade ainda não configurada é esperado, não é erro pro usuário
+   366→    }
+   367→  }, [api]);
+   368→
+   369→  useEffect(() => {
+   370→    if (!carregandoInicial) recarregarResumo();
+   371→  }, [carregandoInicial, recarregarResumo]);
+   372→
+   373→  // ---- calc do procedimento selecionado ----
+   374→  const recarregarCalc = useCallback(
+   375→    async (procId) => {
+   376→      if (!procId) return;
+   377→      try {
+   378→        setCalc(await api(`/procedimentos/${procId}/calculo`));
+   379→      } catch (e) {
+   380→        setCalc(null);
+   381→      }
+   382→    },
+   383→    [api]
+   384→  );
+   385→
+   386→  useEffect(() => {
+   387→    recarregarCalc(selectedProc);
+   388→  }, [selectedProc, recarregarCalc]);
+   389→
+   390→  // pré-carrega os cálculos de todos os procedimentos (só pros ícones de tendência)
+   391→  useEffect(() => {
+   392→    (async () => {
+   393→      const entries = await Promise.all(
+   394→        procedimentos.map(async (p) => {
+   395→          try {
+   396→            return [p.id, await api(`/procedimentos/${p.id}/calculo`)];
+   397→          } catch {
+   398→            return [p.id, null];
+   399→          }
+   400→        })
+   401→      );
+   402→      setCalculos(Object.fromEntries(entries));
+   403→    })();
+   404→  }, [procedimentos, resumo, api]);
+   405→
+   406→  const insumoUnit = (id) => {
+   407→    const it = insumos.find((i) => i.id === id);
+   408→    if (!it || !num(it.quantidade)) return 0;
+   409→    return num(it.valor_total) / num(it.quantidade);
+   410→  };
+   411→
+   412→  // ---- mutators: despesas ----
+   413→  const addDespesa = async () => {
+   414→    try {
+   415→      const nova = await api("/despesas", { method: "POST", body: JSON.stringify({ nome: "Nova despesa", valor: 0 }) });
+   416→      setDespesas((ds) => [...ds, nova]);
+   417→    } catch (e) {
+   418→      avisar(e);
+   419→    }
+   420→  };
+   421→  const updDespesaLocal = (id, field, val) =>
+   422→    setDespesas((ds) => ds.map((d) => (d.id === id ? { ...d, [field]: val } : d)));
+   423→  const salvarDespesa = async (id) => {
+   424→    const d = despesas.find((x) => x.id === id);
+   425→    try {
+   426→      await api(`/despesas/${id}`, { method: "PUT", body: JSON.stringify({ nome: d.nome, valor: num(d.valor) }) });
+   427→      recarregarResumo();
+   428→    } catch (e) {
+   429→      avisar(e);
+   430→    }
+   431→  };
+   432→  const rmDespesa = async (id) => {
+   433→    try {
+   434→      await api(`/despesas/${id}`, { method: "DELETE" });
+   435→      setDespesas((ds) => ds.filter((d) => d.id !== id));
+   436→      recarregarResumo();
+   437→    } catch (e) {
+   438→      avisar(e);
+   439→    }
+   440→  };
+   441→
+   442→  // ---- mutators: ativos (depreciação) ----
+   443→  const addAtivo = async () => {
+   444→    try {
+   445→      const novo = await api("/ativos", {
+   446→        method: "POST",
+   447→        body: JSON.stringify({ nome: "Novo equipamento", dataAquisicao: new Date().toISOString().slice(0, 10), valorAquisicao: 0, vidaUtilAnos: 5 }),
+   448→      });
+   449→      setAtivos((as) => [...as, novo]);
+   450→    } catch (e) {
+   451→      avisar(e);
+   452→    }
+   453→  };
+   454→  const updAtivoLocal = (id, field, val) => setAtivos((as) => as.map((a) => (a.id === id ? { ...a, [field]: val } : a)));
+   455→  const salvarAtivo = async (id) => {
+   456→    const a = ativos.find((x) => x.id === id);
+   457→    try {
+   458→      await api(`/ativos/${id}`, {
+   459→        method: "PUT",
+   460→        body: JSON.stringify({
+   461→          nome: a.nome,
+   462→          dataAquisicao: a.data_aquisicao,
+   463→          valorAquisicao: num(a.valor_aquisicao),
+   464→          vidaUtilAnos: num(a.vida_util_anos),
+   465→        }),
+   466→      });
+   467→      recarregarResumo();
+   468→    } catch (e) {
+   469→      avisar(e);
+   470→    }
+   471→  };
+   472→  const rmAtivo = async (id) => {
+   473→    try {
+   474→      await api(`/ativos/${id}`, { method: "DELETE" });
+   475→      setAtivos((as) => as.filter((a) => a.id !== id));
+   476→      recarregarResumo();
+   477→    } catch (e) {
+   478→      avisar(e);
+   479→    }
+   480→  };
+   481→
+   482→  // ---- agenda de pacientes ----
+   483→  const carregarAgendamentos = useCallback(
+   484→    async (data) => {
+   485→      setCarregandoAgenda(true);
+   486→      try {
+   487→        setAgendamentos(await api(`/agendamentos?data=${data}`));
+   488→      } catch (e) {
+   489→        avisar(e);
+   490→      } finally {
+   491→        setCarregandoAgenda(false);
+   492→      }
+   493→    },
+   494→    [api]
+   495→  );
+   496→  useEffect(() => {
+   497→    if (!carregandoInicial) carregarAgendamentos(dataAgenda);
+   498→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   499→  }, [dataAgenda, carregandoInicial]);
+   500→
+   501→  const mudarDia = (delta) => {
+   502→    const d = new Date(dataAgenda + "T00:00:00");
+   503→    d.setDate(d.getDate() + delta);
+   504→    setDataAgenda(d.toISOString().slice(0, 10));
+   505→  };
+   506→
+   507→  const criarAgendamento = async () => {
+   508→    if (!novoAgendamento?.nome) return;
+   509→    try {
+   510→      await api("/agendamentos", {
+   511→        method: "POST",
+   512→        body: JSON.stringify({ ...novoAgendamento, data: dataAgenda }),
+   513→      });
+   514→      setNovoAgendamento(null);
+   515→      carregarAgendamentos(dataAgenda);
+   516→    } catch (e) {
+   517→      avisar(e);
+   518→    }
+   519→  };
+   520→
+   521→  const mudarStatusAgendamento = async (ag, novoStatus) => {
+   522→    if (novoStatus === "remarcado") {
+   523→      const novaData = window.prompt(`Remarcar "${ag.nome}" para qual data? (AAAA-MM-DD)`, dataAgenda);
+   524→      if (!novaData) return;
+   525→      const novaHora = window.prompt("Horário (opcional, HH:MM):", ag.hora || "") || null;
+   526→      try {
+   527→        await api(`/agendamentos/${ag.id}/remarcar`, { method: "PUT", body: JSON.stringify({ novaData, novaHora }) });
+   528→        carregarAgendamentos(dataAgenda);
+   529→      } catch (e) {
+   530→        avisar(e);
+   531→      }
+   532→      return;
+   533→    }
+   534→    try {
+   535→      await api(`/agendamentos/${ag.id}`, { method: "PUT", body: JSON.stringify({ status: novoStatus }) });
+   536→      carregarAgendamentos(dataAgenda);
+   537→    } catch (e) {
+   538→      avisar(e);
+   539→    }
+   540→  };
+   541→
+   542→  const excluirAgendamento = async (id) => {
+   543→    try {
+   544→      await api(`/agendamentos/${id}`, { method: "DELETE" });
+   545→      carregarAgendamentos(dataAgenda);
+   546→    } catch (e) {
+   547→      avisar(e);
+   548→    }
+   549→  };
+   550→
+   551→  // ---- mutators: capacidade ----
+   552→  const updCapacidadeLocal = (field, val) => setCapacidade((c) => ({ ...c, [field]: val }));
+   553→  const salvarCapacidade = async () => {
+   554→    try {
+   555→      await api("/capacidade", {
+   556→        method: "PUT",
+   557→        body: JSON.stringify({
+   558→          diasTrabalhados: num(capacidade.dias_trabalhados),
+   559→          horasPorDia: num(capacidade.horas_por_dia),
+   560→          unidadesRenda: num(capacidade.unidades_renda),
+   561→          percentOcupacao: num(capacidade.percent_ocupacao),
+   562→        }),
+   563→      });
+   564→      recarregarResumo();
+   565→    } catch (e) {
+   566→      avisar(e);
+   567→    }
+   568→  };
+   569→
+   570→  // ---- mutators: insumos ----
+   571→  const addInsumo = async () => {
+   572→    try {
+   573→      const novo = await api("/insumos", {
+   574→        method: "POST",
+   575→        body: JSON.stringify({ nome: "Novo insumo", unidade: "un", valorTotal: 0, quantidade: 1 }),
+   576→      });
+   577→      setInsumos((is) => [...is, novo]);
+   578→    } catch (e) {
+   579→      avisar(e);
+   580→    }
+   581→  };
+   582→  const updInsumoLocal = (id, field, val) => setInsumos((is) => is.map((i) => (i.id === id ? { ...i, [field]: val } : i)));
+   583→  const salvarInsumo = async (id) => {
+   584→    const it = insumos.find((x) => x.id === id);
+   585→    try {
+   586→      await api(`/insumos/${id}`, {
+   587→        method: "PUT",
+   588→        body: JSON.stringify({ nome: it.nome, unidade: it.unidade, valorTotal: num(it.valor_total), quantidade: num(it.quantidade) }),
+   589→      });
+   590→      recarregarCalc(selectedProc);
+   591→    } catch (e) {
+   592→      avisar(e);
+   593→    }
+   594→  };
+   595→  const rmInsumo = async (id) => {
+   596→    try {
+   597→      await api(`/insumos/${id}`, { method: "DELETE" });
+   598→      setInsumos((is) => is.filter((i) => i.id !== id));
+   599→    } catch (e) {
+   600→      avisar(e);
+   601→    }
+   602→  };
+   603→
+   604→  // ---- mutators: procedimentos ----
+   605→  const addProc = async () => {
+   606→    try {
+   607→      const novo = await api("/procedimentos", { method: "POST", body: JSON.stringify({ nome: "Novo procedimento", tempoMinutos: 10 }) });
+   608→      novo._itens = [];
+   609→      setProcedimentos((ps) => [...ps, novo]);
+   610→      setSelectedProc(novo.id);
+   611→    } catch (e) {
+   612→      avisar(e);
+   613→    }
+   614→  };
+   615→  const rmProc = async (id) => {
+   616→    try {
+   617→      await api(`/procedimentos/${id}`, { method: "DELETE" });
+   618→      const restantes = procedimentos.filter((p) => p.id !== id);
+   619→      setProcedimentos(restantes);
+   620→      if (selectedProc === id) setSelectedProc(restantes[0]?.id || null);
+   621→    } catch (e) {
+   622→      avisar(e);
+   623→    }
+   624→  };
+   625→  const updProcLocal = (id, field, val) => setProcedimentos((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
+   626→
+   627→  const CAMPO_PARA_API = {
+   628→    nome: "nome",
+   629→    tempo_minutos: "tempoMinutos",
+   630→    laudos: "laudos",
+   631→    retrabalho_pct: "retrabalhoPct",
+   632→    comissao_pct: "comissaoPct",
+   633→    lucro_desejado_pct: "lucroDesejadoPct",
+   634→    inadimplencia_pct: "inadimplenciaPct",
+   635→    impostos_pct: "impostosPct",
+   636→    taxa_cartao_pct: "taxaCartaoPct",
+   637→    outros_pct: "outrosPct",
+   638→    preco_concorrencia: "precoConcorrencia",
+   639→    equipamento_id: "equipamentoId",
+   640→  };
+   641→  const CAMPOS_TEXTO_PROC = ["nome", "equipamento_id"]; // não passam por num() ao salvar
+   642→
+   643→  const salvarCampoProc = async (id, campo) => {
+   644→    const p = procedimentos.find((x) => x.id === id);
+   645→    const chaveApi = CAMPO_PARA_API[campo];
+   646→    if (!chaveApi) return;
+   647→    try {
+   648→      await api(`/procedimentos/${id}`, {
+   649→        method: "PUT",
+   650→        body: JSON.stringify({ [chaveApi]: CAMPOS_TEXTO_PROC.includes(campo) ? (p[campo] || null) : num(p[campo]) }),
+   651→      });
+   652→      recarregarCalc(id);
+   653→    } catch (e) {
+   654→      avisar(e);
+   655→    }
+   656→  };
+   657→
+   658→  const salvarPrecoFinal = async (id) => {
+   659→    const p = procedimentos.find((x) => x.id === id);
+   660→    try {
+   661→      await api(`/procedimentos/${id}/preco-final`, { method: "PUT", body: JSON.stringify({ precoNovo: num(p.preco_final) }) });
+   662→      recarregarCalc(id);
+   663→    } catch (e) {
+   664→      avisar(e);
+   665→    }
+   666→  };
+   667→
+   668→  // ---- itens (insumos consumidos) de um procedimento ----
+   669→  const [itensPorProc, setItensPorProc] = useState({});
+   670→  const carregarItens = useCallback(
+   671→    async (procId) => {
+   672→      try {
+   673→        const itens = await api(`/procedimentos/${procId}/itens`);
+   674→        setItensPorProc((m) => ({ ...m, [procId]: itens }));
+   675→      } catch (e) {
+   676→        avisar(e);
+   677→      }
+   678→    },
+   679→    [api]
+   680→  );
+   681→  useEffect(() => {
+   682→    if (selectedProc) carregarItens(selectedProc);
+   683→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   684→  }, [selectedProc]);
+   685→
+   686→  const addItem = async (procId) => {
+   687→    if (!insumos.length) return;
+   688→    // Sempre escolher insumos[0] sem checar o que já está na lista fazia
+   689→    // o botão "não fazer nada" quando esse insumo já estava adicionado —
+   690→    // a chamada só reafirmava quantidade 1 num item que já existia, em vez
+   691→    // de criar uma linha nova.
+   692→    const jaUsados = new Set((itensPorProc[procId] || []).map((it) => it.insumo_id));
+   693→    const proximoInsumo = insumos.find((i) => !jaUsados.has(i.id));
+   694→    if (!proximoInsumo) {
+   695→      avisar("Todos os insumos cadastrados já foram adicionados a este procedimento. Cadastre um novo insumo na aba \"Insumos\" para adicionar mais.");
+   696→      return;
+   697→    }
+   698→    try {
+   699→      await api(`/procedimentos/${procId}/itens`, {
+   700→        method: "POST",
+   701→        body: JSON.stringify({ insumoId: proximoInsumo.id, quantidade: 1 }),
+   702→      });
+   703→      await carregarItens(procId);
+   704→      recarregarCalc(procId);
+   705→    } catch (e) {
+   706→      avisar(e);
+   707→    }
+   708→  };
+   709→  const updItem = async (procId, insumoIdAntigo, novoInsumoId, quantidade) => {
+   710→    try {
+   711→      if (novoInsumoId !== insumoIdAntigo) {
+   712→        await api(`/procedimentos/${procId}/itens/${insumoIdAntigo}`, { method: "DELETE" });
+   713→      }
+   714→      await api(`/procedimentos/${procId}/itens`, {
+   715→        method: "POST",
+   716→        body: JSON.stringify({ insumoId: novoInsumoId, quantidade }),
+   717→      });
+   718→      await carregarItens(procId);
+   719→      recarregarCalc(procId);
+   720→    } catch (e) {
+   721→      avisar(e);
+   722→    }
+   723→  };
+   724→  const rmItem = async (procId, insumoId) => {
+   725→    try {
+   726→      await api(`/procedimentos/${procId}/itens/${insumoId}`, { method: "DELETE" });
+   727→      await carregarItens(procId);
+   728→      recarregarCalc(procId);
+   729→    } catch (e) {
+   730→      avisar(e);
+   731→    }
+   732→  };
+   733→
+   734→  const proc = procedimentos.find((p) => p.id === selectedProc);
+   735→  const itensDoProc = itensPorProc[selectedProc] || [];
+   736→
+   737→  const TODAS_AS_ABAS = [
+   738→    { id: "custos", label: "Custos & capacidade", icon: Clock },
+   739→    { id: "insumos", label: "Insumos", icon: Package },
+   740→    { id: "procedimentos", label: "Procedimentos", icon: Stethoscope },
+   741→    { id: "precificacao", label: "Precificação", icon: Calculator },
+   742→    { id: "agenda", label: "Agenda", icon: CalendarDays },
+   743→    { id: "financeiro", label: "Financeiro", icon: Wallet },
+   744→    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+   745→  ];
+   746→  // Instalação "cliente" (computador da recepção conectado ao servidor da
+   747→  // clínica) só enxerga o que foi pedido: cadastrar insumos e consultar
+   748→  // preços — nada de custos, procedimentos, agenda ou dashboard ali.
+   749→  const tabs = MODO_INSTALACAO === "cliente" ? TODAS_AS_ABAS.filter((t) => ["insumos", "precificacao"].includes(t.id)) : TODAS_AS_ABAS;
+   750→  const precificacaoBloqueada = somenteLeitura || MODO_INSTALACAO === "cliente";
+   751→
+   752→  useEffect(() => {
+   753→    // Se a aba atual não existe mais nesta instalação (ex: veio de um
+   754→    // estado antigo salvo, ou mudou de modo), volta pra primeira disponível.
+   755→    if (!tabs.find((t) => t.id === tab)) setTab(tabs[0].id);
+   756→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   757→  }, [MODO_INSTALACAO]);
+   758→
+   759→  if (carregandoInicial) {
+   760→    return (
+   761→      <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
+   762→        <Loader2 size={20} className="animate-spin text-[var(--accent-text)]" />
+   763→      </div>
+   764→    );
+   765→  }
+   766→
+   767→  return (
+   768→    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+   769→      <div className="border-b border-[var(--border)] bg-[var(--surface)] no-print">
+   770→        <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
+   771→          <div>
+   772→            <div className="text-[11px] uppercase tracking-wide text-[var(--accent-text)] font-medium mb-1 flex items-center gap-2">
+   773→              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent-text)]" />
+   774→              {clinica.nome} · {usuario.nome} ({usuario.papel})
+   775→            </div>
+   776→            <h1 className="text-xl font-medium text-[var(--text)]">Calculadora de custo e preço por procedimento</h1>
+   777→          </div>
+   778→          <div className="flex items-center gap-4 no-print">
+   779→            <button onClick={() => window.print()} className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--accent-text)] border border-[var(--border)] rounded-md px-3 py-1.5">
+   780→              <Printer size={13} /> Imprimir tabela de preços
+   781→            </button>
+   782→            <SeletorDeTema escuro={escuro} setEscuro={setEscuro} cor={cor} setCor={setCor} />
+   783→            <button onClick={onSair} className="text-xs text-[var(--text-faint)] hover:text-[var(--text-secondary)]">
+   784→              sair
+   785→            </button>
+   786→          </div>
+   787→        </div>
+   788→      </div>
+   789→
+   790→      {somenteLeitura && (
+   791→        <div className="max-w-5xl mx-auto px-6 pt-4">
+   792→          <div className="text-xs text-[var(--warning)] bg-[var(--warning-bg)] border border-[var(--warning-border)] rounded-md px-4 py-2">
+   793→            Seu papel é "recepção": você pode consultar tudo, mas edições ficam bloqueadas pela própria API.
+   794→          </div>
+   795→        </div>
+   796→      )}
+   797→
+   798→      {MODO_INSTALACAO === "servidor" && ENDERECO_REDE && (
+   799→        <div className="max-w-5xl mx-auto px-6 pt-4 no-print">
+   800→          <div className="text-xs text-[var(--accent-text)] bg-[var(--accent-soft-bg)] border border-[var(--accent-soft-border)] rounded-md px-4 py-2">
+   801→            Este computador é o <strong>servidor</strong>. Nos computadores clientes, informe o endereço:{" "}
+   802→            <span className="font-mono">{ENDERECO_REDE}</span>
+   803→          </div>
+   804→        </div>
+   805→      )}
+   806→
+   807→      {MODO_INSTALACAO === "cliente" && (
+   808→        <div className="max-w-5xl mx-auto px-6 pt-4 no-print">
+   809→          <div className="text-xs text-[var(--text-muted)] bg-[var(--bg-alt-strong)] border border-[var(--border)] rounded-md px-4 py-2">
+   810→            Conectado ao servidor em <span className="font-mono">{API_BASE}</span> — modo cliente: só cadastro de insumos e consulta de preços.
+   811→          </div>
+   812→        </div>
+   813→      )}
+   814→
+   815→      {erroGlobal && (
+   816→        <div className="max-w-5xl mx-auto px-6 pt-4">
+   817→          <div className="flex items-center justify-between gap-3 text-sm text-[var(--danger)] bg-[var(--danger-bg)] border border-[var(--danger-border)] rounded-md px-4 py-2.5">
+   818→            <div className="flex items-center gap-2">
+   819→              <AlertCircle size={15} /> {erroGlobal}
+   820→            </div>
+   821→            <button onClick={() => setErroGlobal(null)} className="text-[var(--danger-faint)] hover:text-[var(--danger)] text-xs">
+   822→              fechar
+   823→            </button>
+   824→          </div>
+   825→        </div>
+   826→      )}
+   827→
+   828→      <div className="max-w-5xl mx-auto px-6 pt-6 no-print">
+   829→        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+   830→          <StatCard label="Custo fixo total / mês" value={resumo ? brl(resumo.custoFixoTotal) : "—"} sub={resumo && resumo.depreciacaoMensalTotal > 0 ? `inclui ${brl(resumo.depreciacaoMensalTotal)} de depreciação` : undefined} />
+   831→          <StatCard label="Horas efetivas / mês" value={resumo ? resumo.horasEfetivas.toFixed(0) + "h" : "—"} />
+   832→          <StatCard label="Custo fixo / hora" value={resumo ? brl(resumo.custoFixoPorHora) : "—"} accent="text-[var(--accent-text)]" />
+   833→          <StatCard label="Custo fixo / minuto" value={resumo ? brl(resumo.custoFixoPorMinuto) : "—"} accent="text-[var(--accent-text)]" />
+   834→        </div>
+   835→        {!resumo && (
+   836→          <p className="text-xs text-[var(--text-faint)] mt-2">
+   837→            Configure a capacidade produtiva na aba "Custos & capacidade" para calcular o custo fixo por minuto.
+   838→          </p>
+   839→        )}
+   840→      </div>
+   841→
+   842→      <div className="max-w-5xl mx-auto px-6 mt-6 no-print">
+   843→        <div className="flex gap-1 border-b border-[var(--border)]">
+   844→          {tabs.map((t) => {
+   845→            const Icon = t.icon;
+   846→            const active = tab === t.id;
+   847→            return (
+   848→              <button
+   849→                key={t.id}
+   850→                onClick={() => setTab(t.id)}
+   851→                className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+   852→                  active ? "border-[var(--accent-text)] text-[var(--accent-text-hover)] font-medium" : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
+   853→                }`}
+   854→              >
+   855→                <Icon size={15} strokeWidth={1.75} />
+   856→                {t.label}
+   857→              </button>
+   858→            );
+   859→          })}
+   860→        </div>
+   861→      </div>
+   862→
+   863→      <div className="max-w-5xl mx-auto px-6 py-6 no-print">
+   864→        {tab === "custos" && (
+   865→          <div className="space-y-8">
+   866→            <section>
+   867→              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Despesas fixas mensais</h2>
+   868→              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+   869→                <table className="w-full text-sm">
+   870→                  <thead>
+   871→                    <tr className="bg-[var(--bg)] text-[var(--text-muted)] text-xs uppercase tracking-wide">
+   872→                      <th className="text-left font-normal px-4 py-2">Despesa</th>
+   873→                      <th className="text-right font-normal px-4 py-2 w-40">Valor médio mensal</th>
+   874→                      <th className="w-10"></th>
+   875→                    </tr>
+   876→                  </thead>
+   877→                  <tbody>
+   878→                    {despesas.map((d) => (
+   879→                      <tr key={d.id} className="border-t border-[var(--border-subtle)]">
+   880→                        <td className="px-4 py-1.5">
+   881→                          <TextInput value={d.nome} onChange={(v) => updDespesaLocal(d.id, "nome", v)} onBlur={() => salvarDespesa(d.id)} disabled={somenteLeitura} />
+   882→                        </td>
+   883→                        <td className="px-4 py-1.5">
+   884→                          <NumInput prefix="R$" value={d.valor} onChange={(v) => updDespesaLocal(d.id, "valor", v)} onBlur={() => salvarDespesa(d.id)} disabled={somenteLeitura} />
+   885→                        </td>
+   886→                        <td className="px-2 text-center">
+   887→                          <IconBtn onClick={() => rmDespesa(d.id)} title="Remover" disabled={somenteLeitura}>
+   888→                            <Trash2 size={14} />
+   889→                          </IconBtn>
+   890→                        </td>
+   891→                      </tr>
+   892→                    ))}
+   893→                  </tbody>
+   894→                </table>
+   895→                <button onClick={addDespesa} disabled={somenteLeitura} className="flex items-center gap-1.5 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text-hover)] disabled:opacity-30 disabled:cursor-not-allowed px-4 py-2.5 border-t border-[var(--border-subtle)]">
+   896→                  <Plus size={13} /> Adicionar despesa
+   897→                </button>
+   898→              </div>
+   899→            </section>
+   900→
+   901→            <section>
+   902→              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Equipamentos e móveis (depreciação)</h2>
+   903→              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+   904→                <table className="w-full text-sm">
+   905→                  <thead>
+   906→                    <tr className="bg-[var(--bg)] text-[var(--text-muted)] text-xs uppercase tracking-wide">
+   907→                      <th className="text-left font-normal px-4 py-2">Equipamento</th>
+   908→                      <th className="text-left font-normal px-4 py-2 w-36">Aquisição</th>
+   909→                      <th className="text-right font-normal px-4 py-2 w-32">Valor pago</th>
+   910→                      <th className="text-right font-normal px-4 py-2 w-28">Vida útil (anos)</th>
+   911→                      <th className="text-right font-normal px-4 py-2 w-32">Depreciação/mês</th>
+   912→                      <th className="w-10"></th>
+   913→                    </tr>
+   914→                  </thead>
+   915→                  <tbody>
+   916→                    {ativos.map((a) => (
+   917→                      <tr key={a.id} className="border-t border-[var(--border-subtle)]">
+   918→                        <td className="px-4 py-1.5">
+   919→                          <TextInput value={a.nome} onChange={(v) => updAtivoLocal(a.id, "nome", v)} onBlur={() => salvarAtivo(a.id)} disabled={somenteLeitura} />
+   920→                        </td>
+   921→                        <td className="px-4 py-1.5">
+   922→                          <input
+   923→                            type="date"
+   924→                            value={a.data_aquisicao || ""}
+   925→                            disabled={somenteLeitura}
+   926→                            onChange={(e) => updAtivoLocal(a.id, "data_aquisicao", e.target.value)}
+   927→                            onBlur={() => salvarAtivo(a.id)}
+   928→                            className="w-full bg-transparent border-b border-[var(--border-strong)] focus:border-[var(--accent-text)] outline-none text-sm py-0.5 px-1 disabled:text-[var(--text-faint)]"
+   929→                          />
+   930→                        </td>
+   931→                        <td className="px-4 py-1.5">
+   932→                          <NumInput prefix="R$" value={a.valor_aquisicao} onChange={(v) => updAtivoLocal(a.id, "valor_aquisicao", v)} onBlur={() => salvarAtivo(a.id)} disabled={somenteLeitura} />
+   933→                        </td>
+   934→                        <td className="px-4 py-1.5">
+   935→                          <NumInput value={a.vida_util_anos} onChange={(v) => updAtivoLocal(a.id, "vida_util_anos", v)} onBlur={() => salvarAtivo(a.id)} disabled={somenteLeitura} />
+   936→                        </td>
+   937→                        <td className="px-4 py-1.5 text-right font-mono text-sm tabular-nums text-[var(--text-secondary)]">
+   938→                          {brl(num(a.vida_util_anos) > 0 ? num(a.valor_aquisicao) / num(a.vida_util_anos) / 12 : 0)}
+   939→                        </td>
+   940→                        <td className="px-2 text-center">
+   941→                          <IconBtn onClick={() => rmAtivo(a.id)} title="Remover" disabled={somenteLeitura}>
+   942→                            <Trash2 size={14} />
+   943→                          </IconBtn>
+   944→                        </td>
+   945→                      </tr>
+   946→                    ))}
+   947→                    {resumo && (
+   948→                      <tr className="border-t border-[var(--border)] bg-[var(--bg)] font-medium">
+   949→                        <td className="px-4 py-2" colSpan={4}>Depreciação mensal total</td>
+   950→                        <td className="px-4 py-2 text-right font-mono tabular-nums">{brl(resumo.depreciacaoMensalTotal)}</td>
+   951→                        <td></td>
+   952→                      </tr>
+   953→                    )}
+   954→                  </tbody>
+   955→                </table>
+   956→                <button onClick={addAtivo} disabled={somenteLeitura} className="flex items-center gap-1.5 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text-hover)] disabled:opacity-30 disabled:cursor-not-allowed px-4 py-2.5 border-t border-[var(--border-subtle)]">
+   957→                  <Plus size={13} /> Adicionar equipamento
+   958→                </button>
+   959→              </div>
+   960→              <p className="text-xs text-[var(--text-faint)] mt-2">
+   961→                Depreciação mensal = valor pago ÷ vida útil (anos) ÷ 12. Entra automaticamente no custo fixo total, junto com as despesas acima.
+   962→              </p>
+   963→            </section>
+   964→
+   965→            {capacidade && (
+   966→              <section>
+   967→                <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Capacidade produtiva</h2>
+   968→                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-5 grid grid-cols-2 sm:grid-cols-4 gap-5">
+   969→                  <div>
+   970→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Dias trabalhados / mês</label>
+   971→                    <NumInput value={capacidade.dias_trabalhados} onChange={(v) => updCapacidadeLocal("dias_trabalhados", v)} onBlur={salvarCapacidade} disabled={somenteLeitura} />
+   972→                  </div>
+   973→                  <div>
+   974→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Horas por dia</label>
+   975→                    <NumInput value={capacidade.horas_por_dia} onChange={(v) => updCapacidadeLocal("horas_por_dia", v)} onBlur={salvarCapacidade} disabled={somenteLeitura} />
+   976→                  </div>
+   977→                  <div>
+   978→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Unidades de renda (salas/aparelhos)</label>
+   979→                    <NumInput value={capacidade.unidades_renda} onChange={(v) => updCapacidadeLocal("unidades_renda", v)} onBlur={salvarCapacidade} disabled={somenteLeitura} />
+   980→                  </div>
+   981→                  <div>
+   982→                    <label className="text-xs text-[var(--text-faint)] block mb-1">% de ocupação</label>
+   983→                    <NumInput step="0.01" value={capacidade.percent_ocupacao} onChange={(v) => updCapacidadeLocal("percent_ocupacao", v)} onBlur={salvarCapacidade} disabled={somenteLeitura} />
+   984→                  </div>
+   985→                </div>
+   986→              </section>
+   987→            )}
+   988→          </div>
+   989→        )}
+   990→
+   991→        {tab === "insumos" && (
+   992→          <section>
+   993→            <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Catálogo de insumos e consumíveis</h2>
+   994→            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+   995→              <table className="w-full text-sm">
+   996→                <thead>
+   997→                  <tr className="bg-[var(--bg)] text-[var(--text-muted)] text-xs uppercase tracking-wide">
+   998→                    <th className="text-left font-normal px-4 py-2">Item</th>
+   999→                    <th className="text-left font-normal px-4 py-2 w-24">Unidade</th>
+  1000→                    <th className="text-right font-normal px-4 py-2 w-32">Valor total (R$)</th>
+  1001→                    <th className="text-right font-normal px-4 py-2 w-28">Quantidade</th>
+  1002→                    <th className="text-right font-normal px-4 py-2 w-32">Custo unitário</th>
+  1003→                    <th className="w-10"></th>
+  1004→                  </tr>
+  1005→                </thead>
+  1006→                <tbody>
+  1007→                  {insumos.map((it) => (
+  1008→                    <tr key={it.id} className="border-t border-[var(--border-subtle)]">
+  1009→                      <td className="px-4 py-1.5">
+  1010→                        <TextInput value={it.nome} onChange={(v) => updInsumoLocal(it.id, "nome", v)} onBlur={() => salvarInsumo(it.id)} disabled={somenteLeitura} />
+  1011→                      </td>
+  1012→                      <td className="px-4 py-1.5">
+  1013→                        <TextInput value={it.unidade} onChange={(v) => updInsumoLocal(it.id, "unidade", v)} onBlur={() => salvarInsumo(it.id)} disabled={somenteLeitura} />
+  1014→                      </td>
+  1015→                      <td className="px-4 py-1.5">
+  1016→                        <NumInput prefix="R$" value={it.valor_total} onChange={(v) => updInsumoLocal(it.id, "valor_total", v)} onBlur={() => salvarInsumo(it.id)} disabled={somenteLeitura} />
+  1017→                      </td>
+  1018→                      <td className="px-4 py-1.5">
+  1019→                        <NumInput value={it.quantidade} onChange={(v) => updInsumoLocal(it.id, "quantidade", v)} onBlur={() => salvarInsumo(it.id)} disabled={somenteLeitura} />
+  1020→                      </td>
+  1021→                      <td className="px-4 py-1.5 text-right font-mono text-sm tabular-nums text-[var(--text-secondary)]">{brl(insumoUnit(it.id))}</td>
+  1022→                      <td className="px-2 text-center">
+  1023→                        <IconBtn onClick={() => rmInsumo(it.id)} title="Remover" disabled={somenteLeitura}>
+  1024→                          <Trash2 size={14} />
+  1025→                        </IconBtn>
+  1026→                      </td>
+  1027→                    </tr>
+  1028→                  ))}
+  1029→                </tbody>
+  1030→              </table>
+  1031→              <button onClick={addInsumo} disabled={somenteLeitura} className="flex items-center gap-1.5 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text-hover)] disabled:opacity-30 disabled:cursor-not-allowed px-4 py-2.5 border-t border-[var(--border-subtle)]">
+  1032→                <Plus size={13} /> Adicionar insumo
+  1033→              </button>
+  1034→            </div>
+  1035→          </section>
+  1036→        )}
+  1037→
+  1038→        {tab === "procedimentos" && (
+  1039→          <div className="grid grid-cols-1 sm:grid-cols-[220px_1fr] gap-6">
+  1040→            <div>
+  1041→              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Procedimentos</h2>
+  1042→              <div className="space-y-1">
+  1043→                {procedimentos.map((p) => (
+  1044→                  <button
+  1045→                    key={p.id}
+  1046→                    onClick={() => setSelectedProc(p.id)}
+  1047→                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+  1048→                      selectedProc === p.id ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent-soft-border)]"
+  1049→                    }`}
+  1050→                  >
+  1051→                    {p.nome || "(sem nome)"}
+  1052→                  </button>
+  1053→                ))}
+  1054→                <button onClick={addProc} disabled={somenteLeitura} className="w-full flex items-center gap-1.5 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text-hover)] disabled:opacity-30 disabled:cursor-not-allowed px-3 py-2">
+  1055→                  <Plus size={13} /> Novo procedimento
+  1056→                </button>
+  1057→              </div>
+  1058→            </div>
+  1059→
+  1060→            {proc && (
+  1061→              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-5 space-y-5">
+  1062→                <div className="flex items-start justify-between gap-3">
+  1063→                  <div className="flex-1">
+  1064→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Nome do procedimento</label>
+  1065→                    <TextInput value={proc.nome} onChange={(v) => updProcLocal(proc.id, "nome", v)} onBlur={() => salvarCampoProc(proc.id, "nome")} className="text-base" disabled={somenteLeitura} />
+  1066→                  </div>
+  1067→                  <IconBtn onClick={() => rmProc(proc.id)} title="Remover procedimento" disabled={somenteLeitura}>
+  1068→                    <Trash2 size={16} />
+  1069→                  </IconBtn>
+  1070→                </div>
+  1071→
+  1072→                <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
+  1073→                  <div>
+  1074→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Tempo (minutos)</label>
+  1075→                    <NumInput value={proc.tempo_minutos} onChange={(v) => updProcLocal(proc.id, "tempo_minutos", v)} onBlur={() => salvarCampoProc(proc.id, "tempo_minutos")} disabled={somenteLeitura} />
+  1076→                  </div>
+  1077→                  <div>
+  1078→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Laudos / planejamento (R$)</label>
+  1079→                    <NumInput prefix="R$" value={proc.laudos} onChange={(v) => updProcLocal(proc.id, "laudos", v)} onBlur={() => salvarCampoProc(proc.id, "laudos")} disabled={somenteLeitura} />
+  1080→                  </div>
+  1081→                  <div>
+  1082→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Retrabalho / desperdício</label>
+  1083→                    <NumInput step="0.01" value={proc.retrabalho_pct} onChange={(v) => updProcLocal(proc.id, "retrabalho_pct", v)} onBlur={() => salvarCampoProc(proc.id, "retrabalho_pct")} disabled={somenteLeitura} />
+  1084→                  </div>
+  1085→                  <div>
+  1086→                    <label className="text-xs text-[var(--text-faint)] block mb-1">Equipamento usado</label>
+  1087→                    <select
+  1088→                      value={proc.equipamento_id || ""}
+  1089→                      disabled={somenteLeitura}
+  1090→                      onChange={(e) => { updProcLocal(proc.id, "equipamento_id", e.target.value || null); setTimeout(() => salvarCampoProc(proc.id, "equipamento_id"), 0); }}
+  1091→                      className="w-full bg-transparent border-b border-[var(--border-strong)] focus:border-[var(--accent-text)] outline-none text-sm py-0.5 px-1 disabled:text-[var(--text-faint)]"
+  1092→                    >
+  1093→                      <option value="">— nenhum —</option>
+  1094→                      {ativos.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
+  1095→                    </select>
+  1096→                    <p className="text-[10px] text-[var(--text-faint)] mt-0.5">alimenta a rentabilidade por hora no Financeiro</p>
+  1097→                  </div>
+  1098→                </div>
+  1099→
+  1100→                <div>
+  1101→                  <div className="flex items-center justify-between mb-2">
+  1102→                    <label className="text-xs text-[var(--text-faint)]">Insumos consumidos</label>
+  1103→                    <button onClick={() => addItem(proc.id)} disabled={somenteLeitura} className="flex items-center gap-1 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text-hover)] disabled:opacity-30 disabled:cursor-not-allowed">
+  1104→                      <Plus size={12} /> item
+  1105→                    </button>
+  1106→                  </div>
+  1107→                  <div className="border border-[var(--border)] rounded-md overflow-hidden">
+  1108→                    {itensDoProc.length === 0 && <div className="text-xs text-[var(--text-faint)] px-3 py-3">Nenhum insumo associado ainda.</div>}
+  1109→                    {itensDoProc.map((it) => (
+  1110→                      <div key={it.insumo_id} className="flex items-center gap-2 px-3 py-1.5 border-t border-[var(--border-subtle)] first:border-t-0 text-sm">
+  1111→                        <select
+  1112→                          value={it.insumo_id}
+  1113→                          disabled={somenteLeitura}
+  1114→                          onChange={(e) => updItem(proc.id, it.insumo_id, e.target.value, it.quantidade)}
+  1115→                          className="flex-1 bg-transparent border-b border-[var(--border-strong)] outline-none py-0.5 text-sm disabled:text-[var(--text-faint)]"
+  1116→                        >
+  1117→                          {insumos.map((i) => (
+  1118→                            <option key={i.id} value={i.id}>
+  1119→                              {i.nome}
+  1120→                            </option>
+  1121→                          ))}
+  1122→                        </select>
+  1123→                        <NumInput
+  1124→                          className="w-20"
+  1125→                          value={it.quantidade}
+  1126→                          onChange={(v) => setItensPorProc((m) => ({ ...m, [proc.id]: m[proc.id].map((x) => (x.insumo_id === it.insumo_id ? { ...x, quantidade: v } : x)) }))}
+  1127→                          onBlur={() => updItem(proc.id, it.insumo_id, it.insumo_id, num(it.quantidade))}
+  1128→                        disabled={somenteLeitura} />
+  1129→                        <span className="text-xs text-[var(--text-faint)] font-mono w-20 text-right">{brl(num(it.quantidade) * insumoUnit(it.insumo_id))}</span>
+  1130→                        <IconBtn onClick={() => rmItem(proc.id, it.insumo_id)} title="Remover item" disabled={somenteLeitura}>
+  1131→                          <Trash2 size={13} />
+  1132→                        </IconBtn>
+  1133→                      </div>
+  1134→                    ))}
+  1135→                  </div>
+  1136→                </div>
+  1137→
+  1138→                {calc && (
+  1139→                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[var(--border-subtle)]">
+  1140→                    <StatCard label="Rateio custo fixo" value={brl(calc.rateio)} />
+  1141→                    <StatCard label="Custo de insumos" value={brl(calc.custoInsumos)} />
+  1142→                  </div>
+  1143→                )}
+  1144→              </div>
+  1145→            )}
+  1146→          </div>
+  1147→        )}
+  1148→
+  1149→        {tab === "precificacao" && (
+  1150→          <div className="grid grid-cols-1 sm:grid-cols-[220px_1fr] gap-6">
+  1151→            <div>
+  1152→              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Procedimentos</h2>
+  1153→              <div className="space-y-1">
+  1154→                {procedimentos.map((p) => {
+  1155→                  const c = calculos[p.id];
+  1156→                  return (
+  1157→                    <button
+  1158→                      key={p.id}
+  1159→                      onClick={() => setSelectedProc(p.id)}
+  1160→                      className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between gap-2 ${
+  1161→                        selectedProc === p.id ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent-soft-border)]"
+  1162→                      }`}
+  1163→                    >
+  1164→                      <span className="truncate">{p.nome}</span>
+  1165→                      {c && isFinite(c.lucratividadeFinal) &&
+  1166→                        (c.lucratividadeFinal >= 0 ? (
+  1167→                          <TrendingUp size={13} className={selectedProc === p.id ? "text-white" : "text-[var(--accent-text)]"} />
+  1168→                        ) : (
+  1169→                          <TrendingDown size={13} className={selectedProc === p.id ? "text-white" : "text-[var(--danger)]"} />
+  1170→                        ))}
+  1171→                    </button>
+  1172→                  );
+  1173→                })}
+  1174→              </div>
+  1175→            </div>
+  1176→
+  1177→            {proc && (
+  1178→              <div className="space-y-5">
+  1179→                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-5">
+  1180→                  <h3 className="text-base font-medium mb-4">{proc.nome}</h3>
+  1181→                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-5">
+  1182→                    <div>
+  1183→                      <label className="text-xs text-[var(--text-faint)] block mb-1">Comissão comercial</label>
+  1184→                      <NumInput step="0.01" value={proc.comissao_pct} onChange={(v) => updProcLocal(proc.id, "comissao_pct", v)} onBlur={() => salvarCampoProc(proc.id, "comissao_pct")} disabled={precificacaoBloqueada} />
+  1185→                    </div>
+  1186→                    <div>
+  1187→                      <label className="text-xs text-[var(--text-faint)] block mb-1">Lucro desejado</label>
+  1188→                      <NumInput step="0.01" value={proc.lucro_desejado_pct} onChange={(v) => updProcLocal(proc.id, "lucro_desejado_pct", v)} onBlur={() => salvarCampoProc(proc.id, "lucro_desejado_pct")} disabled={precificacaoBloqueada} />
+  1189→                    </div>
+  1190→                    <div>
+  1191→                      <label className="text-xs text-[var(--text-faint)] block mb-1">Inadimplência</label>
+  1192→                      <NumInput step="0.01" value={proc.inadimplencia_pct} onChange={(v) => updProcLocal(proc.id, "inadimplencia_pct", v)} onBlur={() => salvarCampoProc(proc.id, "inadimplencia_pct")} disabled={precificacaoBloqueada} />
+  1193→                    </div>
+  1194→                    <div>
+  1195→                      <label className="text-xs text-[var(--text-faint)] block mb-1">Impostos</label>
+  1196→                      <NumInput step="0.01" value={proc.impostos_pct} onChange={(v) => updProcLocal(proc.id, "impostos_pct", v)} onBlur={() => salvarCampoProc(proc.id, "impostos_pct")} disabled={precificacaoBloqueada} />
+  1197→                    </div>
+  1198→                    <div>
+  1199→                      <label className="text-xs text-[var(--text-faint)] block mb-1">Taxa de cartão</label>
+  1200→                      <NumInput step="0.01" value={proc.taxa_cartao_pct} onChange={(v) => updProcLocal(proc.id, "taxa_cartao_pct", v)} onBlur={() => salvarCampoProc(proc.id, "taxa_cartao_pct")} disabled={precificacaoBloqueada} />
+  1201→                    </div>
+  1202→                    <div>
+  1203→                      <label className="text-xs text-[var(--text-faint)] block mb-1">Preço da concorrência</label>
+  1204→                      <NumInput prefix="R$" value={proc.preco_concorrencia} onChange={(v) => updProcLocal(proc.id, "preco_concorrencia", v)} onBlur={() => salvarCampoProc(proc.id, "preco_concorrencia")} disabled={precificacaoBloqueada} />
+  1205→                    </div>
+  1206→                  </div>
+  1207→
+  1208→                  {calc ? (
+  1209→                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+  1210→                      <StatCard label="Custo direto total" value={brl(calc.custoDireto)} />
+  1211→                      <StatCard label="Ponto de equilíbrio" value={brl(calc.pontoEquilibrio)} accent="text-[var(--text-secondary)]" />
+  1212→                      <StatCard label="Preço sugerido" value={brl(calc.precoSugerido)} accent="text-[var(--accent-text)]" />
+  1213→                    </div>
+  1214→                  ) : (
+  1215→                    <p className="text-xs text-[var(--text-faint)]">Configure a capacidade produtiva para ver o cálculo.</p>
+  1216→                  )}
+  1217→                </div>
+  1218→
+  1219→                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-5">
+  1220→                  <label className="text-xs text-[var(--text-faint)] block mb-1">Preço final praticado</label>
+  1221→                  <div className="flex items-end gap-4">
+  1222→                    <NumInput
+  1223→                      prefix="R$"
+  1224→                      value={proc.preco_final}
+  1225→                      onChange={(v) => updProcLocal(proc.id, "preco_final", v)}
+  1226→                      onBlur={() => salvarPrecoFinal(proc.id)}
+  1227→                      className="text-lg max-w-[160px]"
+  1228→                    disabled={precificacaoBloqueada} />
+  1229→                    <div className="flex-1">
+  1230→                      <div className="text-[11px] uppercase tracking-wide text-[var(--text-faint)] mb-1">Lucratividade final</div>
+  1231→                      <div className={`text-2xl font-mono tabular-nums ${calc && calc.lucratividadeFinal >= 0 ? "text-[var(--accent-text)]" : "text-[var(--danger)]"}`}>
+  1232→                        {calc && isFinite(calc.lucratividadeFinal) ? pct(calc.lucratividadeFinal) : "—"}
+  1233→                      </div>
+  1234→                    </div>
+  1235→                  </div>
+  1236→                </div>
+  1237→              </div>
+  1238→            )}
+  1239→          </div>
+  1240→        )}
+  1241→
+  1242→        {tab === "agenda" && (
+  1243→          <div className="space-y-4">
+  1244→            <div className="flex items-center justify-between">
+  1245→              <div className="flex items-center gap-2">
+  1246→                <IconBtn onClick={() => mudarDia(-1)} title="Dia anterior">
+  1247→                  <ChevronLeft size={16} />
+  1248→                </IconBtn>
+  1249→                <input
+  1250→                  type="date"
+  1251→                  value={dataAgenda}
+  1252→                  onChange={(e) => setDataAgenda(e.target.value)}
+  1253→                  className="border border-[var(--border)] rounded-md px-3 py-1.5 text-sm"
+  1254→                />
+  1255→                <IconBtn onClick={() => mudarDia(1)} title="Próximo dia">
+  1256→                  <ChevronRight size={16} />
+  1257→                </IconBtn>
+  1258→                <button onClick={() => setDataAgenda(new Date().toISOString().slice(0, 10))} className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text-hover)] ml-1">
+  1259→                  hoje
+  1260→                </button>
+  1261→              </div>
+  1262→              {!somenteLeitura && !novoAgendamento && (
+  1263→                <button
+  1264→                  onClick={() => setNovoAgendamento({ nome: "", telefone: "", exame: "", plano: false, particular: false, hora: "" })}
+  1265→                  className="flex items-center gap-1.5 text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-md px-3 py-1.5"
+  1266→                >
+  1267→                  <Plus size={13} /> Novo agendamento
+  1268→                </button>
+  1269→              )}
+  1270→            </div>
+  1271→
+  1272→            {novoAgendamento && (
+  1273→              <div className="bg-[var(--surface)] border border-[var(--accent-soft-border)] rounded-lg p-4 grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
+  1274→                <div className="col-span-2">
+  1275→                  <label className="text-xs text-[var(--text-faint)] block mb-1">Nome</label>
+  1276→                  <TextInput value={novoAgendamento.nome} onChange={(v) => setNovoAgendamento((n) => ({ ...n, nome: v }))} />
+  1277→                </div>
+  1278→                <div>
+  1279→                  <label className="text-xs text-[var(--text-faint)] block mb-1">Telefone</label>
+  1280→                  <TextInput value={novoAgendamento.telefone} onChange={(v) => setNovoAgendamento((n) => ({ ...n, telefone: v }))} />
+  1281→                </div>
+  1282→                <div>
+  1283→                  <label className="text-xs text-[var(--text-faint)] block mb-1">Exame</label>
+  1284→                  <TextInput value={novoAgendamento.exame} onChange={(v) => setNovoAgendamento((n) => ({ ...n, exame: v }))} />
+  1285→                </div>
+  1286→                <div>
+  1287→                  <label className="text-xs text-[var(--text-faint)] block mb-1">Horário</label>
+  1288→                  <input
+  1289→                    type="time"
+  1290→                    value={novoAgendamento.hora}
+  1291→                    onChange={(e) => setNovoAgendamento((n) => ({ ...n, hora: e.target.value }))}
+  1292→                    className="w-full border-b border-[var(--border-strong)] focus:border-[var(--accent-text)] outline-none text-sm py-0.5 px-1 bg-transparent"
+  1293→                  />
+  1294→                </div>
+  1295→                <div className="flex items-center gap-3 text-sm">
+  1296→                  <label className="flex items-center gap-1.5">
+  1297→                    <input type="checkbox" checked={novoAgendamento.plano} onChange={(e) => setNovoAgendamento((n) => ({ ...n, plano: e.target.checked }))} />
+  1298→                    Plano
+  1299→                  </label>
+  1300→                  <label className="flex items-center gap-1.5">
+  1301→                    <input type="checkbox" checked={novoAgendamento.particular} onChange={(e) => setNovoAgendamento((n) => ({ ...n, particular: e.target.checked }))} />
+  1302→                    Particular
+  1303→                  </label>
+  1304→                </div>
+  1305→                <div className="col-span-2 sm:col-span-6 flex gap-2 justify-end pt-1">
+  1306→                  <button onClick={() => setNovoAgendamento(null)} className="text-xs text-[var(--text-faint)] hover:text-[var(--text-secondary)] px-3 py-1.5">
+  1307→                    cancelar
+  1308→                  </button>
+  1309→                  <button onClick={criarAgendamento} disabled={!novoAgendamento.nome} className="text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white rounded-md px-3 py-1.5">
+  1310→                    salvar
+  1311→                  </button>
+  1312→                </div>
+  1313→              </div>
+  1314→            )}
+  1315→
+  1316→            <div className="flex items-center gap-3 flex-wrap text-xs text-[var(--text-muted)]">
+  1317→              {Object.entries(STATUS_AGENDAMENTO).map(([k, v]) => (
+  1318→                <span key={k} className={`px-2 py-0.5 rounded-full ${v.classe}`}>{v.label}</span>
+  1319→              ))}
+  1320→            </div>
+  1321→
+  1322→            {carregandoAgenda ? (
+  1323→              <div className="flex items-center gap-2 text-sm text-[var(--text-faint)] py-8 justify-center">
+  1324→                <Loader2 size={16} className="animate-spin" /> Carregando...
+  1325→              </div>
+  1326→            ) : agendamentos.length === 0 ? (
+  1327→              <p className="text-sm text-[var(--text-faint)] py-8 text-center">Nenhum agendamento para este dia.</p>
+  1328→            ) : (
+  1329→              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg divide-y divide-[var(--border-subtle)]">
+  1330→                {agendamentos.map((ag) => {
+  1331→                  const st = STATUS_AGENDAMENTO[ag.status] || STATUS_AGENDAMENTO.aguardando;
+  1332→                  return (
+  1333→                    <div key={ag.id} className="flex items-center gap-4 px-4 py-3">
+  1334→                      <div className="w-14 text-sm font-mono text-[var(--text-muted)] shrink-0">{ag.hora || "—"}</div>
+  1335→                      <div className="flex-1 min-w-0">
+  1336→                        <div className="text-sm font-medium text-[var(--text)] truncate">{ag.nome}</div>
+  1337→                        <div className="text-xs text-[var(--text-faint)] truncate">
+  1338→                          {ag.telefone || "sem telefone"} {ag.exame ? `· ${ag.exame}` : ""}
+  1339→                          {ag.plano ? " · Plano" : ""}
+  1340→                          {ag.particular ? " · Particular" : ""}
+  1341→                        </div>
+  1342→                      </div>
+  1343→                      {ag.status === "remarcado" && ag.remarcado_para_data ? (
+  1344→                        <button
+  1345→                          onClick={() => setDataAgenda(ag.remarcado_para_data)}
+  1346→                          className="flex items-center gap-1 text-xs text-[var(--warning)] hover:text-[var(--warning-strong)] shrink-0"
+  1347→                        >
+  1348→                          <ArrowRight size={12} />
+  1349→                          {new Date(ag.remarcado_para_data + "T00:00:00").toLocaleDateString("pt-BR")}
+  1350→                        </button>
+  1351→                      ) : (
+  1352→                        <select
+  1353→                          value={ag.status}
+  1354→                          disabled={somenteLeitura}
+  1355→                          onChange={(e) => mudarStatusAgendamento(ag, e.target.value)}
+  1356→                          className={`text-xs rounded-full px-2 py-1 border-none outline-none shrink-0 ${st.classe} disabled:opacity-60`}
+  1357→                        >
+  1358→                          {Object.entries(STATUS_AGENDAMENTO).map(([k, v]) => (
+  1359→                            <option key={k} value={k}>{v.label}</option>
+  1360→                          ))}
+  1361→                        </select>
+  1362→                      )}
+  1363→                      <IconBtn onClick={() => excluirAgendamento(ag.id)} title="Excluir" disabled={somenteLeitura}>
+  1364→                        <Trash2 size={14} />
+  1365→                      </IconBtn>
+  1366→                    </div>
+  1367→                  );
+  1368→                })}
+  1369→              </div>
+  1370→            )}
+  1371→          </div>
+  1372→        )}
+  1373→
+  1374→        {tab === "financeiro" && (
+  1375→          <FinanceiroModule api={api} somenteLeitura={somenteLeitura} avisar={avisar} procedimentos={procedimentos} insumos={insumos} />
+  1376→        )}
+  1377→
+  1378→        {tab === "dashboard" && (
+  1379→          <div className="space-y-6">
+  1380→            {procedimentos.length === 0 ? (
+  1381→              <p className="text-sm text-[var(--text-faint)]">Cadastre procedimentos para ver os gráficos aqui.</p>
+  1382→            ) : (
+  1383→              <>
+  1384→                <section>
+  1385→                  <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Preço sugerido vs. preço praticado</h2>
+  1386→                  <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4" style={{ height: 320 }}>
+  1387→                    <ResponsiveContainer width="100%" height="100%">
+  1388→                      <BarChart
+  1389→                        data={procedimentos.map((p) => ({
+  1390→                          nome: p.nome,
+  1391→                          sugerido: calculos[p.id] && isFinite(calculos[p.id].precoSugerido) ? Number(calculos[p.id].precoSugerido.toFixed(2)) : 0,
+  1392→                          praticado: Number(p.preco_final) || 0,
+  1393→                        }))}
+  1394→                        margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+  1395→                      >
+  1396→                        <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+  1397→                        <XAxis dataKey="nome" angle={-30} textAnchor="end" interval={0} tick={{ fontSize: 11 }} height={60} />
+  1398→                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${v}`} />
+  1399→                        <Tooltip formatter={(v) => brl(v)} />
+  1400→                        <Bar dataKey="sugerido" name="Preço sugerido" fill="#0f766e" radius={[4, 4, 0, 0]} />
+  1401→                        <Bar dataKey="praticado" name="Preço praticado" fill="#a8a29e" radius={[4, 4, 0, 0]} />
+  1402→                      </BarChart>
+  1403→                    </ResponsiveContainer>
+  1404→                  </div>
+  1405→                  <p className="text-xs text-[var(--text-faint)] mt-2">
+  1406→                    Barras cinzas bem abaixo das verdes indicam procedimentos vendidos por menos do que o cálculo sugere.
+  1407→                  </p>
+  1408→                </section>
+  1409→
+  1410→                <section>
+  1411→                  <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Lucratividade final por procedimento</h2>
+  1412→                  <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4" style={{ height: 320 }}>
+  1413→                    <ResponsiveContainer width="100%" height="100%">
+  1414→                      <BarChart
+  1415→                        data={procedimentos.map((p) => ({
+  1416→                          nome: p.nome,
+  1417→                          lucratividade:
+  1418→                            calculos[p.id] && isFinite(calculos[p.id].lucratividadeFinal)
+  1419→                              ? Number((calculos[p.id].lucratividadeFinal * 100).toFixed(1))
+  1420→                              : 0,
+  1421→                        }))}
+  1422→                        margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+  1423→                      >
+  1424→                        <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+  1425→                        <XAxis dataKey="nome" angle={-30} textAnchor="end" interval={0} tick={{ fontSize: 11 }} height={60} />
+  1426→                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
+  1427→                        <Tooltip formatter={(v) => `${v}%`} />
+  1428→                        <Bar dataKey="lucratividade" name="Lucratividade" radius={[4, 4, 0, 0]}>
+  1429→                          {procedimentos.map((p, i) => {
+  1430→                            const c = calculos[p.id];
+  1431→                            const negativo = c && isFinite(c.lucratividadeFinal) && c.lucratividadeFinal < 0;
+  1432→                            return <Cell key={i} fill={negativo ? "#dc2626" : "#0f766e"} />;
+  1433→                          })}
+  1434→                          <LabelList dataKey="lucratividade" position="top" formatter={(v) => `${v}%`} style={{ fontSize: 10, fill: "#78716c" }} />
+  1435→                        </Bar>
+  1436→                      </BarChart>
+  1437→                    </ResponsiveContainer>
+  1438→                  </div>
+  1439→                </section>
+  1440→
+  1441→                {despesas.length > 0 && (
+  1442→                  <section>
+  1443→                    <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Composição das despesas fixas</h2>
+  1444→                    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4" style={{ height: 280 }}>
+  1445→                      <ResponsiveContainer width="100%" height="100%">
+  1446→                        <BarChart
+  1447→                          layout="vertical"
+  1448→                          data={[...despesas].sort((a, b) => num(b.valor) - num(a.valor)).map((d) => ({ nome: d.nome, valor: num(d.valor) }))}
+  1449→                          margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+  1450→                        >
+  1451→                          <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+  1452→                          <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${v}`} />
+  1453→                          <YAxis type="category" dataKey="nome" width={140} tick={{ fontSize: 11 }} />
+  1454→                          <Tooltip formatter={(v) => brl(v)} />
+  1455→                          <Bar dataKey="valor" fill="#0f766e" radius={[0, 4, 4, 0]} />
+  1456→                        </BarChart>
+  1457→                      </ResponsiveContainer>
+  1458→                    </div>
+  1459→                  </section>
+  1460→                )}
+  1461→              </>
+  1462→            )}
+  1463→          </div>
+  1464→        )}
+  1465→      </div>
+  1466→
+  1467→      {/* Relatório para impressão — invisível na tela, só aparece no papel/PDF via Ctrl+P.
+  1468→          Sempre em preto sobre branco, mesmo com o tema escuro ativado na tela. */}
+  1469→      <style>{`
+  1470→        .relatorio-impressao { display: none; }
+  1471→        @media print {
+  1472→          .no-print { display: none !important; }
+  1473→          .relatorio-impressao { display: block !important; color: #1c1917; background: white; }
+  1474→          .relatorio-impressao * { color: #1c1917 !important; border-color: #1c1917 !important; }
+  1475→          body { background: white; }
+  1476→        }
+  1477→      `}</style>
+  1478→      <div className="relatorio-impressao px-8 py-6">
+  1479→        <h1 className="text-xl font-semibold mb-1">{clinica.nome}</h1>
+  1480→        <p className="text-sm text-[var(--text-muted)] mb-6">
+  1481→          Tabela de preços — gerada em {new Date().toLocaleDateString("pt-BR")} · custo fixo/minuto:{" "}
+  1482→          {resumo ? brl(resumo.custoFixoPorMinuto) : "—"}
+  1483→        </p>
+  1484→        <table className="w-full text-sm border-collapse">
+  1485→          <thead>
+  1486→            <tr className="border-b-2 border-[var(--text)] text-left">
+  1487→              <th className="py-2 pr-3">Procedimento</th>
+  1488→              <th className="py-2 pr-3 text-right">Custo direto</th>
+  1489→              <th className="py-2 pr-3 text-right">Preço sugerido</th>
+  1490→              <th className="py-2 pr-3 text-right">Preço praticado</th>
+  1491→              <th className="py-2 pr-3 text-right">Lucratividade</th>
+  1492→            </tr>
+  1493→          </thead>
+  1494→          <tbody>
+  1495→            {procedimentos.map((p) => {
+  1496→              const c = calculos[p.id];
+  1497→              return (
+  1498→                <tr key={p.id} className="border-b border-[var(--border)]">
+  1499→                  <td className="py-2 pr-3">{p.nome}</td>
+  1500→                  <td className="py-2 pr-3 text-right font-mono">{c ? brl(c.custoDireto) : "—"}</td>
+  1501→                  <td className="py-2 pr-3 text-right font-mono">{c && isFinite(c.precoSugerido) ? brl(c.precoSugerido) : "—"}</td>
+  1502→                  <td className="py-2 pr-3 text-right font-mono">{brl(p.preco_final)}</td>
+  1503→                  <td className="py-2 pr-3 text-right font-mono">{c && isFinite(c.lucratividadeFinal) ? pct(c.lucratividadeFinal) : "—"}</td>
+  1504→                </tr>
+  1505→              );
+  1506→            })}
+  1507→          </tbody>
+  1508→        </table>
+  1509→      </div>
+  1510→    </div>
+  1511→  );
+  1512→}
+  1513→
+  1514→// ---------- root: decide entre tela de login e app conectado ----------
+  1515→export default function PricingAppConnected() {
+  1516→  const [sessao, setSessao] = useState(null); // { token, usuario, clinica }
+  1517→
+  1518→  if (!sessao) {
+  1519→    return <AuthScreen onAutenticado={setSessao} />;
+  1520→  }
+  1521→  return <ConnectedApp sessao={sessao} onSair={() => setSessao(null)} />;
+  1522→}
+  1523→

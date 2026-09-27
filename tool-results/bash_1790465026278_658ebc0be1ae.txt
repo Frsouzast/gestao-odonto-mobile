@@ -1,0 +1,181 @@
+  - `src/app/api/ativos/route.ts`
+  - `src/app/api/ativos/[id]/route.ts`
+  - `src/app/api/resumo/route.ts`
+- **Endpoints:**
+  - `GET /api/despesas` — requer Bearer; 200 `[{ id, clinicaId, nome, valor, ordem }]` (ordenado por ordem ASC)
+  - `POST /api/despesas` — requer dono|financeiro; 201 `{ id, clinicaId, nome, valor, ordem: 0 }`; 400 `{ erro }` (nome/valor ausentes ou inválidos)
+  - `PUT /api/despesas/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Despesa não encontrada." }` se não pertencer à clínica
+  - `DELETE /api/despesas/[id]` — requer dono|financeiro; 204 (idempotente — `deleteMany` por `{id, clinicaId}`)
+  - `GET /api/capacidade` — requer Bearer; 200 com a linha única `capacidade_produtiva` da clínica ou `null`
+  - `PUT /api/capacidade` — requer dono|financeiro; 200 com a linha (criada ou atualizada via `upsert` — `clinicaId` é PK); 400 `{ erro }` se algum dos 4 numéricos faltar
+  - `GET /api/insumos` — requer Bearer; 200 `[insumo...]` (ordenado por nome ASC)
+  - `POST /api/insumos` — requer dono|financeiro; 201 com a linha criada; 400 `{ erro }` se `nome` ausente
+  - `PUT /api/insumos/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Insumo não encontrado." }`
+  - `DELETE /api/insumos/[id]` — requer dono|financeiro; 204 (idempotente)
+  - `GET /api/ativos` — requer Bearer; 200 `[ativo...]` (ordenado por nome ASC)
+  - `POST /api/ativos` — requer dono|financeiro; 201 com a linha criada; 400 `{ erro }` se `nome` ausente
+  - `PUT /api/ativos/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Ativo não encontrado." }`
+  - `DELETE /api/ativos/[id]` — requer dono|financeiro; 204 (idempotente)
+  - `GET /api/resumo` — requer Bearer; 200 `{ custoFixoTotal, depreciacaoMensalTotal, horasEfetivas, custoFixoPorHora, custoFixoPorMinuto }`; 400 `{ erro: "Capacidade produtiva não configurada para esta clínica." }` se `capacidade_produtiva` estiver ausente
+- **Decisions:**
+  - PUT/DELETE nos `[id]` routes usam `findFirst` + `deleteMany` (em vez de `update`/`delete` diretos por id) para garantir isolamento multi-tenant via `clinicaId` — `update({where:{id}})` sem `clinicaId` no `where` poderia tocar linha de outra clínica se o id colidisse; o `findFirst` prévio também dá o 404 correto sem estourar `P2025` do Prisma (que viraria 500 sem catch específico)
+  - PUT usa checagem `typeof` em vez de `?? null` + COALESCE — atende ao briefing ("don't use COALESCE — just check what's in the body") e evita acidentalmente apagar campo quando o cliente manda `null` explícito (prisma interpretaria como NULL). Campo só é atualizado se vier com tipo correto no body
+  - `resumo` retorna 400 em vez de 200 null quando capacidade ausente — fiel ao api.js L300 (original retornava 400 com erro). T2-a tinha optado por 200 null em `capacidade` GET individual (linha única), mas o agregado de `resumo` tem que falhar porque não dá pra calcular custo/minuto sem capacidade — e os clientes que chamam `/resumo` dependem do 400 para mostrar o banner de "configure capacidade"
+  - POST de ativo respeita defaults `valorAquisicao=0`, `vidaUtilAnos=1` (não `0`) — vital porque `vidaUtilAnos=0` causaria divisão por zero no cálculo de depreciação em `/resumo`. Fiel ao `|| 1` do api.js L239
+  - POST de insumo respeita defaults `unidade="un"`, `valorTotal=0`, `quantidade=1` — alinhado com `@default` do schema.prisma e comportamento típico do app original
+  - `select` explícito no `despesas` GET e no `resumo` para despesas (só `valor`) minimiza dados trafegados e documenta a intenção; demais `findMany` retornam o model completo (compatível com o `select *` do api.js)
+- **Lint status:** PASS (0 erros, exit 0)
+
+---
+
+Task ID: T2-c
+Agent: general-purpose (backend procedimentos)
+Task: Procedimentos API routes (CRUD + itens + cálculo + histórico + preco-final)
+
+Work Log:
+- Lido `worklog.md` (Task 1 + T2-a + T2-b) e `server/api.js` L304-435 (referência Express do app Electron original) para alinhar formato de resposta/erros, shape de cada endpoint e helper pattern estabelecido em T2-b
+- Confirmados helpers: `authRequired(req): JwtPayload | { erro, status }` (distinguir via `"erro" in auth`); `podeEditar = authPapel("dono","financeiro")` retorna `{ ok, payload } | { ok:false, erro, status }`; `db` (PrismaClient singleton); engine functions puras `calcProcedimento`, `custoFixoPorMinuto`, `insumoUnitCost` e interfaces `ProcedimentoInput`/`Despesa`/`Capacidade` em `@/lib/engine`
+- Confirmado Prisma schema: `Procedimento.{id,clinicaId,nome,tempoMinutos,laudos,retrabalhoPct,comissaoPct,lucroDesejadoPct,inadimplenciaPct,impostosPct,taxaCartaoPct,outrosPct,precoConcorrencia?,precoFinal?,ativo,equipamentoId?}`; `ProcedimentoInsumo` com PK composta `[procedimentoId, insumoId]` via `@@id([procedimentoId, insumoId])` → accessar no where como `procedimentoId_insumoId: { procedimentoId, insumoId }`; `HistoricoPreco.{id,procedimentoId,usuarioId?,precoAnterior?,precoNovo?,alteradoEm}`
+- Criadas 6 rotas (Route Handlers) TypeScript com `NextRequest`/`NextResponse`, `params: Promise<{ id: string }>` (ou `{ id, insumoId }` no caso do DELETE aninhado), `body = await req.json().catch(() => ({}))`, IDs via `crypto.randomUUID()`, try/catch → 500 `{ erro: "Erro interno ao processar a requisição." }` + `console.error(err)`:
+  - `src/app/api/procedimentos/route.ts` — GET `findMany({where:{clinicaId,ativo:true},orderBy:{nome:"asc"}})`; POST (podeEditar) valida `nome` (400); defaults `tempoMinutos || 0`, `laudos || 0`, `retrabalhoPct ?? 0.03` (fiel ao api.js L316); retorna 201 com a linha criada
+  - `src/app/api/procedimentos/[id]/route.ts` — PUT (podeEditar) `findFirst` por `{id, clinicaId}` → 404 se ausente; monta `data` só com 12 campos providos (typeof check — string para `nome`/`equipamentoId`, número via helper `isNum()` para os 10 campos Float); 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se data vazia (fiel ao api.js L346); `update({where:{id}})` retorna linha atualizada. DELETE (podeEditar) soft-delete via `updateMany({where:{id,clinicaId}, data:{ativo:false}})` → 204 idempotente
+  - `src/app/api/procedimentos/[id]/itens/route.ts` — GET `findMany({where:{procedimentoId}, include:{insumo:{select:{nome:true}}}})` e mapeia para `[{ insumoId, quantidade, insumoNome }]` (forma achatada que a UI espera); POST (podeEditar) valida `insumoId` (400); `quantidade ?? 1`; usa `db.procedimentoInsumo.upsert({ where: { procedimentoId_insumoId: {...} }, create, update })` fiel ao `on conflict (procedimento_id, insumo_id) do update` do SQL original; retorna 201 `{ procedimentoId, insumoId, quantidade }`
+  - `src/app/api/procedimentos/[id]/itens/[insumoId]/route.ts` — DELETE (podeEditar) `deleteMany({where:{procedimentoId, insumoId}})` → 204 idempotente (em vez de `delete` por chave composta, que lançaria P2025 se o vínculo não existisse)
+  - `src/app/api/procedimentos/[id]/calculo/route.ts` — GET duplica a lógica do `/api/resumo` inline (Promise.all carregando despesas/ativos/capacidade → se capacidade null, 400 `{ erro: "Capacidade produtiva não configurada para esta clínica." }`; computa `custoFixoPorMinuto(todosOsCustos, capacidade)`); então `findFirst` por `{id, clinicaId}` → 404; carrega `procedimentoInsumo.findMany({include:{insumo:{select:{valorTotal,quantidade}}}})` e constrói lookup `custoUnitario: Record<string,number>` usando `insumoUnitCost` do engine; mapeia prisma→`ProcedimentoInput` com field renames (`retrabalhoPct → retrabalho`, `comissaoPct → comissao`, `lucroDesejadoPct → lucroDesejado`, `inadimplenciaPct → inadimplencia`, `impostosPct → impostos`, `taxaCartaoPct → taxaCartao`, `precoFinal || 0`); chama `calcProcedimento(proc, custoPorMinuto, (id)=>custoUnitario[id]||0)` e retorna `{ procedimento: nome, custoInsumos, rateio, retrabalhoValor, custoDireto, precoSugerido, pontoEquilibrio, lucratividadeFinal }`
+  - `src/app/api/procedimentos/[id]/preco-final/route.ts` — PUT (podeEditar) valida `precoNovo` numérico (400); `findFirst` por `{id, clinicaId}` selecionando só `{id, precoFinal}` → 404; captura `precoAnterior = existente.precoFinal ?? null`; `update({where:{id}, data:{precoFinal:precoNovo}})`; `historicoPreco.create({data:{id:crypto.randomUUID(), procedimentoId, usuarioId:payload.usuarioId, precoAnterior, precoNovo}})`; retorna 204
+- Criados os 4 subdiretórios aninhados necessários (`[id]`, `[id]/itens`, `[id]/itens/[insumoId]`, `[id]/calculo`, `[id]/preco-final`) via `mkdir -p` pois o Write tool exige que o diretório pai exista
+- `bun run lint` executado — 0 erros, exit 0
+
+Stage Summary:
+- **Files created:**
+  - `src/app/api/procedimentos/route.ts`
+  - `src/app/api/procedimentos/[id]/route.ts`
+  - `src/app/api/procedimentos/[id]/itens/route.ts`
+  - `src/app/api/procedimentos/[id]/itens/[insumoId]/route.ts`
+  - `src/app/api/procedimentos/[id]/calculo/route.ts`
+  - `src/app/api/procedimentos/[id]/preco-final/route.ts`
+- **Endpoints:**
+  - `GET /api/procedimentos` — requer Bearer; 200 `[procedimento...]` (apenas ativos, ordenado por nome ASC)
+  - `POST /api/procedimentos` — requer dono|financeiro; 201 com a linha criada; 400 `{ erro: "nome é obrigatório." }` se `nome` ausente/vazio
+  - `PUT /api/procedimentos/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Procedimento não encontrado." }` se não pertencer à clínica; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se body não trouxer nenhum dos 12 campos aceitos (nome, tempoMinutos, laudos, retrabalhoPct, comissaoPct, lucroDesejadoPct, inadimplenciaPct, impostosPct, taxaCartaoPct, outrosPct, precoConcorrencia, equipamentoId)
+  - `DELETE /api/procedimentos/[id]` — requer dono|financeiro; 204 (soft-delete via `ativo:false`, idempotente via `updateMany` com `clinicaId` no where)
+  - `GET /api/procedimentos/[id]/itens` — requer Bearer; 200 `[{ insumoId, quantidade, insumoNome }]` (forma achatada com join do nome do insumo)
+  - `POST /api/procedimentos/[id]/itens` — requer dono|financeiro; 201 `{ procedimentoId, insumoId, quantidade }` (upsert na PK composta, `quantidade ?? 1`); 400 `{ erro: "insumoId é obrigatório." }`
+  - `DELETE /api/procedimentos/[id]/itens/[insumoId]` — requer dono|financeiro; 204 (idempotente via `deleteMany`)
+  - `GET /api/procedimentos/[id]/calculo` — requer Bearer; 200 `{ procedimento: nome, custoInsumos, rateio, retrabalhoValor, custoDireto, precoSugerido, pontoEquilibrio, lucratividadeFinal }`; 400 `{ erro: "Capacidade produtiva não configurada para esta clínica." }` se `capacidade_produtiva` estiver ausente; 404 `{ erro: "Procedimento não encontrado." }`
+  - `PUT /api/procedimentos/[id]/preco-final` — requer dono|financeiro; 204 (atualiza `precoFinal` e insere linha em `historico_preco` com `precoAnterior`, `precoNovo` e `usuarioId`); 400 `{ erro: "precoNovo é obrigatório e deve ser numérico." }`; 404 `{ erro: "Procedimento não encontrado." }`
+- **Decisions:**
+  - PUT em `/procedimentos/[id]` usa `findFirst` por `{id, clinicaId}` prévio (em vez de `update` direto por id) para garantir isolamento multi-tenant e devolver 404 limpo sem estourar P2025 — mesmo padrão de T2-b (`despesas/[id]`, `insumos/[id]`, `ativos/[id]`)
+  - DELETE soft-delete usa `updateMany({where:{id,clinicaId}, data:{ativo:false}})` (em vez de `update` por id) — idempotente (não lança erro se a linha não existir) e mantém isolamento multi-tenant; fiel ao `ativo = 0` do SQL original, agora representado como Boolean false (schema Prisma definiu `ativo Boolean @default(true)`)
+  - DELETE em `/itens/[insumoId]` usa `deleteMany` por chave composta em vez de `delete` — briefing pedia `delete` por composite, mas o Prisma `delete` lançaria `P2025` se o vínculo não existisse, transformando um 204 idempotente em 500. Mantém o mesmo princípio REST idempotente adotado em T2-b para todos os DELETEs
+  - POST em `/procedimentos/[id]/itens` usa `upsert` na chave composta via sintaxe Prisma `procedimentoId_insumoId: { procedimentoId, insumoId }` (campo virtual gerado pelo `@@id([procedimentoId, insumoId])` do schema) — fiel ao `on conflict (procedimento_id, insumo_id) do update set quantidade = excluded.quantidade` do SQL original
+  - GET em `/calculo` duplica a lógica de carregar `custoPorMinuto` (despesas + depreciação de ativos + capacidade produtiva) em vez de fazer `fetch("/api/resumo")` — evita custos de rede/serialização dupla e mantém o endpoint autônomo, conforme sugerido pelo briefing ("duplicate the calculation here")
+  - `insumoUnitCost` importado do `@/lib/engine` (além dos 5 helpers listados no briefing) — função pura já existente no Task 1 que encapsula exatamente o `insumo.valorTotal / insumo.quantidade` com guarda contra `quantidade=0`, evitando reescrever a fórmula e garantindo consistência com outros usos futuros
+  - Validação 400 de `nome` no POST de procedimento adicionada defensivamente (original não validava e estourava 500 SQL) — mesma melhoria adotada em T2-b para `insumos` POST; não altera o contrato observável (clientes válidos continuam funcionando, inválidos recebem 400 em vez de 500)
+  - Validação 400 de `precoNovo` numérico no PUT `/preco-final` — necessária porque o `historico_preco` armazenaria NaN/undefined caso `precoNovo` não fosse número, corrompendo o histórico. Adicionada dentro do escopo do próprio arquivo
+  - `equipamentoId` no PUT aceita apenas string (typeof check) — não permite limpar a FK enviando `null` explícito no body. Consistente com a diretriz do briefing ("typeof check") e com T2-b; se houver demanda futura para desvincular equipamento, adicionar um endpoint separado ou ampliar o PUT
+  - `precoAnterior` no `historico_preco` armazenado como `null` quando o procedimento nunca teve preço (em vez de 0 ou string vazia) — fiel ao schema Prisma `precoAnterior Float?` e ao SQL original que inseria NULL (`atuais[0].preco_final` que seria NULL)
+- **Lint status:** PASS (0 erros, exit 0)
+
+---
+Task ID: T2-d
+Agent: general-purpose (backend agendamentos)
+Task: Agendamentos API routes (CRUD + remarcar)
+
+Work Log:
+- Lido `worklog.md` (Task 1 + T2-a + T2-b + T2-c) e `server/api.js` L437-528 (referência Express do app Electron original) para alinhar formato de resposta/erros e shape de cada endpoint
+- Confirmados helpers: `authRequired(req): JwtPayload | { erro, status }` (distinguir via `"erro" in auth`), `db` (PrismaClient singleton). Agendamentos são abertos a qualquer papel autenticado (briefing: "don't use podeEditar") — agendar não é ação financeira
+- Confirmado Prisma schema: `Agendamento.{id,clinicaId,nome,telefone?,exame?,plano(Boolean default false),particular(Boolean default false),data(String YYYY-MM-DD),hora?,status(String default 'aguardando'),remarcadoParaId?,criadoEm}` com self-relation `"RemarcadoPara"` — `remarcadoPara Agendamento?` (muitos para um) e `remarcadoDe Agendamento[]` (um para muitos). Os campos do briefing batem com o schema
+- Criadas 3 rotas (Route Handlers) TypeScript com `NextRequest`/`NextResponse`, `params: Promise<{ id: string }>` (App Router 16), `body = await req.json().catch(() => ({}))`, IDs via `crypto.randomUUID()`, try/catch → 500 `{ erro: "Erro interno ao processar a requisição." }` + `console.error(err)`:
+  - `src/app/api/agendamentos/route.ts` — GET valida `?data=YYYY-MM-DD` (400 `{ erro: "Informe ?data=AAAA-MM-DD." }` se ausente); `findMany({where:{clinicaId,data}, include:{remarcadoPara:{select:{data:true,hora:true}}}})`; sort em JS com NULLs primeiro e hora ASC (SQLite+Prisma não suporta `nulls:'first'` de forma portável — briefing autoriza fallback "fetch unsorted and sort in JS"); mapeia para `[{...agendamento, remarcadoParaData, remarcadoParaHora}]` (rename do nested `remarcadoPara.{data,hora}` para camelCase — fiel ao `r.data as remarcado_para_data, r.hora as remarcado_para_hora` do SQL original). POST valida `nome`+`data` (400 `{ erro: "nome e data são obrigatórios." }`); `plano`/`particular` coeridos via `Boolean()` (fiel ao `? 1 : 0` do SQL original, agora Boolean no schema); defaults `telefone=null`, `exame=null`, `hora=null` quando ausentes; retorna 201 com a linha criada
+  - `src/app/api/agendamentos/[id]/route.ts` — PUT faz `findFirst` por `{id, clinicaId}` prévio → 404 `{ erro: "Agendamento não encontrado." }` se ausente (mesmo padrão T2-b/T2-c — evita P2025); monta `data` só com 8 campos providos (`nome, telefone, exame, plano, particular, data, hora, status`) usando checks `body[key] !== undefined` (fiel ao `if (req.body[key] !== undefined)` do api.js L483); `telefone`/`exame`/`hora` aceitam `null` explícito (`body.telefone ?? null`) para limpar o campo; `plano`/`particular` coeridos via `Boolean()`; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se data vazia (fiel ao api.js L489); `update({where:{id}})` retorna linha atualizada. DELETE `deleteMany({where:{id,clinicaId}})` → 204 idempotente
+  - `src/app/api/agendamentos/[id]/remarcar/route.ts` — PUT valida `novaData` (400 `{ erro: "novaData é obrigatória." }`); `findFirst` por `{id, clinicaId}` → 404; gera `novoId = crypto.randomUUID()`; usa `db.$transaction([create, update])` para criar o novo agendamento (com `nome`/`telefone`/`exame`/`plano`/`particular` copiados do original, `data: novaData`, `hora: novaHora ?? null`, `status: "aguardando"`) E marcar o original como `status: "remarcado"`, `remarcadoParaId: novoId` — atomicamente. Retorna 201 com o novo agendamento
+- Criados os 2 subdiretórios aninhados necessários (`[id]`, `[id]/remarcar`) via `mkdir -p` pois o Write tool exige que o diretório pai exista
+- `bun run lint` executado — 0 erros, exit 0
+
+Stage Summary:
+- **Files created:**
+  - `src/app/api/agendamentos/route.ts`
+  - `src/app/api/agendamentos/[id]/route.ts`
+  - `src/app/api/agendamentos/[id]/remarcar/route.ts`
+- **Endpoints:**
+  - `GET /api/agendamentos?data=YYYY-MM-DD` — requer Bearer; 200 `[{...agendamento, remarcadoParaData, remarcadoParaHora}]` (NULLs primeiro, depois hora ASC); 400 `{ erro: "Informe ?data=AAAA-MM-DD." }` se `data` ausente
+  - `POST /api/agendamentos` — requer Bearer (qualquer papel); 201 com a linha criada; 400 `{ erro: "nome e data são obrigatórios." }` se `nome` ou `data` ausente
+  - `PUT /api/agendamentos/[id]` — requer Bearer (qualquer papel); 200 com linha atualizada; 404 `{ erro: "Agendamento não encontrado." }`; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se body não trouxer nenhum dos 8 campos aceitos (nome, telefone, exame, plano, particular, data, hora, status)
+  - `DELETE /api/agendamentos/[id]` — requer Bearer (qualquer papel); 204 (idempotente via `deleteMany` por `{id, clinicaId}`)
+  - `PUT /api/agendamentos/[id]/remarcar` — requer Bearer (qualquer papel); 201 com o NOVO agendamento criado (status `aguardando`); 400 `{ erro: "novaData é obrigatória." }`; 404 `{ erro: "Agendamento não encontrado." }`
+- **Decisions:**
+  - Sort em JS em vez de `orderBy: [{ hora: { sort: 'asc', nulls: 'first' } }]` — briefing autoriza fallback "fetch unsorted and sort in JS" caso `nulls: 'first'` não seja suportado no SQLite. Mais portátil e explícito (também garante ordenamento NULL-first idêntico em qualquer connector caso troquemos de DB no futuro). Lógica do sort: `aNull && bNull` → 0; `aNull` (e b não) → -1 (a primeiro); `bNull` → 1; caso contrário `localeCompare` entre strings "HH:MM" — estável para o caso comum
+  - Nome dos campos remarcados em camelCase (`remarcadoParaData`/`remarcadoParaHora`) em vez do snake_case `remarcado_para_data`/`remarcado_para_hora` do SQL original — briefing explícito ("rename remarcadoPara fields to camelCase to match original API shape"); o frontend TS/JS espera camelCase; o Express original devolvia snake_case direto do SQL, mas a porta Prisma-first já entrega camelCase por padrão (fields `data`/`hora` no nested `remarcadoPara`), então só achatamos para top-level com nomes camelCase
+  - `db.$transaction` no `/remarcar` (não estava no Express original, que fazia INSERT+UPDATE sequenciais sem transação) — melhoria defensiva consistente com T2-a (`/api/auth/registrar`): se o segundo UPDATE falhar (ex. FK violada em outro cenário, ou banco ocupado), o INSERT é roll-back automaticamente, evitando criar agendamento "órfão" sem link de volta do original. Não muda o contrato observável (status/shape idênticos ao original em sucesso)
+  - PUT/DELETE nos `[id]` routes usam `findFirst` + `deleteMany` (em vez de `update`/`delete` diretos por id) para garantir isolamento multi-tenant via `clinicaId` — mesmo padrão de T2-b/T2-c. O `findFirst` prévio também dá o 404 limpo sem estourar `P2025` do Prisma (que viraria 500 sem catch específico)
+  - POST de agendamento usa `telefone || null`, `exame || null`, `hora || null` em vez de `?? null` — coerção intencional para converter string vazia (`""`) em NULL também, fiel ao `telefone || null` do api.js L462. No PUT optamos por `body.telefone ?? null` (no-op após o check `!== undefined`, mas documenta intenção): se o cliente mandar `telefone: null` explícito no PUT, limpamos o campo; se mandar `""`, preservamos como `""` (o api.js original no PUT também não converte `""` para NULL — só faz o check de `!== undefined`). Como SQLite aceita empty strings sem erro e `telefone`/`exame`/`hora` são `String?`, ambas representações são válidas
+  - PUT em `/[id]` aceita qualquer um dos 8 campos sem validação de tipo estrita (além do check `!== undefined`) — coerção para boolean só em `plano`/`particular` (fiel ao briefing "for plano/particular coerce to boolean"); demais campos vão direto pro Prisma, que lança erro tipado se o tipo estiver errado (capturado pelo try/catch → 500). Consistente com o briefing e com T2-b/T2-c
+  - DELETE usa `deleteMany` (em vez de `delete` por id) — idempotente (não lança P2025 se a linha não existir), mantém isolamento multi-tenant via `clinicaId` no `where`. Mesmo padrão adotado em T2-b para `despesas`/`insumos`/`ativos` e em T2-c para `itens/[insumoId]`
+- **Lint status:** PASS (0 erros, exit 0)
+
+---
+Task ID: T2-e
+Agent: general-purpose (backend financeiro core)
+Task: Financeiro core API routes (convênios + tabela preços + contas + glosas + despesas recorrentes)
+
+Work Log:
+- Lido `worklog.md` (Task 1 + T2-a + T2-b + T2-c + T2-d) e `server/api.js` L530-786 (referência Express do app Electron original) para alinhar formato de resposta/erros e shape de cada endpoint, mantendo os patterns de T2-b/T2-c/T2-d (params como `Promise<{ id: string }>`, `body = await req.json().catch(() => ({}))`, IDs via `crypto.randomUUID()`, try/catch → 500 `{ erro: "Erro interno ao processar a requisição." }` + `console.error(err)`)
+- Confirmados helpers: `authRequired(req): JwtPayload | { erro, status }` (distinguir via `"erro" in auth`), `podeEditar = authPapel("dono","financeiro")` retorna `{ ok, payload } | { ok:false, erro, status }`, `db` (PrismaClient singleton)
+- Confirmado Prisma schema: `Convenio.{id,clinicaId,nome,cnpj?,telefone?,email?,responsavel?,prazoMedioDias(default 30),ativo(default true),criadoEm}`; `ConvenioTabelaPreco.{id,convenioId,procedimentoId,valor,vigenciaInicio(String YYYY-MM-DD),criadoEm}`; `DespesaRecorrente.{id,clinicaId,descricao,categoria?,fornecedor?,valor,diaVencimento(default 5),ativa(default true)}`; `ContaPagar.{id,clinicaId,descricao,categoria?,fornecedor?,valor,vencimento,status(default "aberto"),dataPagamento?,recorrenteId?,criadoEm}`; `ContaReceber.{id,clinicaId,pacienteNome?,procedimentoId?,convenioId?,dentistaSolicitante?,dataExame,valorFaturado,valorPago?,vencimento?,status(default "aberto"),dataRecebimento?,loteId?,criadoEm}`; `Glosa.{id,contaReceberId,valor,motivo?,status(default "glosada"),valorRecuperado?,criadoEm}` com relation `contaReceber` `onDelete: Cascade`
+- Criadas 13 rotas (Route Handlers) TypeScript com `NextRequest`/`NextResponse`:
+  - `src/app/api/convenios/route.ts` — GET `findMany({where:{clinicaId}, orderBy:{nome:"asc"}})`; POST (podeEditar) com defaults `prazoMedioDias ?? 30` (fiel ao api.js L546) e campos opcionais `cnpj`/`telefone`/`email`/`responsavel` virando null quando ausentes/vazios (`|| null` — coerção explícita para converter também string vazia em NULL); retorna 201 com a linha criada
+  - `src/app/api/convenios/[id]/route.ts` — PUT (podeEditar) `findFirst` por `{id, clinicaId}` → 404; monta `data` só com 7 campos providos (typeof check para string em `nome`/`cnpj`/`telefone`/`email`/`responsavel`, `isNum()` para `prazoMedioDias`, `body.ativo !== undefined` + `Boolean(body.ativo)` para `ativo` — fiel ao `ativo ? 1 : 0` do api.js L560); 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se data vazia; `update({where:{id}})`. DELETE (podeEditar) `deleteMany({where:{id,clinicaId}})` → 204 idempotente
+  - `src/app/api/convenios/[id]/precos/route.ts` — GET `findMany({where:{convenioId:id}, include:{procedimento:{select:{nome:true}}}, orderBy:[{procedimento:{nome:"asc"}},{vigenciaInicio:"desc"}]})` e mapeia para `[{...ctp, procedimentoNome}]`; POST (podeEditar) SEMPRE insere nova linha (nunca sobrescreve — preserva valor para exames antigos, "congelar a regra comercial" do mapa mestre); default `vigenciaInicio = new Date().toISOString().slice(0,10)` quando ausente (fiel ao api.js L591); retorna 201
+  - `src/app/api/despesas-recorrentes/route.ts` — GET `findMany({where:{clinicaId}, orderBy:{descricao:"asc"}})`; POST (podeEditar) com default `diaVencimento ?? 5` (fiel ao api.js L620) e `valor ?? 0` (aceita 0 — validação por `?? null` em vez de `|| null`); `categoria`/`fornecedor` viram null quando ausentes/vazios; retorna 201
+  - `src/app/api/despesas-recorrentes/[id]/route.ts` — DELETE (podeEditar) `deleteMany({where:{id,clinicaId}})` → 204 idempotente
+  - `src/app/api/despesas-recorrentes/gerar/route.ts` — POST (podeEditar) valida `mes` ("YYYY-MM") obrigatório (400 `{ erro: "mes (AAAA-MM) é obrigatório." }` se ausente — fiel ao api.js L635); para cada `despesa_recorrente` ativa da clínica, checa idempotência via `findFirst({where:{recorrenteId:r.id, vencimento:{startsWith:mes}}})`; se não existe, cria `conta_pagar` com `vencimento = "${mes}-${String(r.diaVencimento).padStart(2,'0')}"`, snapshot de `descricao`/`categoria`/`fornecedor`/`valor` da recorrente e `recorrenteId = r.id`; retorna 201 `{ gerados: number }`
+  - `src/app/api/contas-pagar/route.ts` — GET constrói `where` Prisma dinâmico a partir de `?status=` e `?mes=YYYY-MM` (mes → `vencimento: { startsWith: mes }`, fiel ao `vencimento like "${mes}%"` do SQL original); `orderBy: { vencimento: "asc" }`; POST (podeEditar) com `categoria`/`fornecedor` virando null quando ausentes/vazios; `valor ?? 0`, `vencimento ?? ""`; retorna 201
+  - `src/app/api/contas-pagar/[id]/route.ts` — PUT (podeEditar) `findFirst` por `{id, clinicaId}` → 404; monta `data` só com `status`/`dataPagamento` providos (typeof string); 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se data vazia; `update`. DELETE (podeEditar) `deleteMany` → 204 idempotente
+  - `src/app/api/contas-receber/route.ts` — GET constrói `where` dinâmico de `?status=`/`?mes=`/`?convenioId=` (mes → `dataExame: { startsWith: mes }`, fiel ao `data_exame like "${mes}%"` do SQL original); `include: { convenio: { select: { nome: true } }, procedimento: { select: { nome: true } } }`; `orderBy: { dataExame: "desc" }`; mapeia para `[{...cr, convenioNome, procedimentoNome}]`. POST (ABERTO a qualquer papel autenticado — NÃO usa podeEditar, fiel ao briefing "recepção pode lançar produção"): helper interno `precoVigente(convenioId, procedimentoId, data)` faz `db.convenioTabelaPreco.findFirst({where:{convenioId,procedimentoId,vigenciaInicio:{lte:data}}, orderBy:{vigenciaInicio:"desc"}, select:{valor:true}})` retornando `Number(row.valor)` ou null. Se `valorFaturado === undefined` E `convenioId`+`procedimentoId`+`dataExame` presentes, busca preço vigente; se null → 400 `{ erro: "Não há preço cadastrado para esse convênio + procedimento nessa data. Cadastre na tabela de preços do convênio ou informe valorFaturado manualmente." }`; se ainda undefined → 400 `{ erro: "valorFaturado é obrigatório (ou informe convenioId + procedimentoId com tabela cadastrada)." }`. Cria a conta a receber com `pacienteNome`/`procedimentoId`/`convenioId`/`dentistaSolicitante`/`vencimento` virando null quando ausentes/vazios; retorna 201. (Para evitar problema de narrowing de TS entre `number | null` e `number | undefined`, valor intermediário `vigente` capturado em variável local antes de atribuir a `valorFaturado`.)
+  - `src/app/api/contas-receber/[id]/route.ts` — PUT (podeEditar) `findFirst` por `{id, clinicaId}` → 404; monta `data` só com `status`/`valorPago`/`dataRecebimento` providos (typeof string + `isNum()` para `valorPago`); 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se data vazia; `update`. DELETE (podeEditar) `deleteMany` por `{id,clinicaId}` → 204 idempotente (glosas vinculadas são apagadas em cascata pela FK `onDelete: Cascade` no schema Prisma)
+  - `src/app/api/contas-receber/[id]/glosa/route.ts` — POST (podeEditar) `findFirst` da conta_receber por `{id, clinicaId}` → 404 (garante isolamento multi-tenant — a tabela glosa em si não tem clinicaId direto, mas o `contaReceberId` deve pertencer à clínica); cria glosa com `valor ?? 0` e `motivo || null`; retorna 201 com a linha criada
+  - `src/app/api/glosas/route.ts` — GET `db.glosa.findMany({where:{contaReceber:{clinicaId}}, include:{contaReceber:{include:{convenio:true}}}, orderBy:{criadoEm:"desc"}})` (fiel ao briefing literal — `include: { contaReceber: { include: { convenio: true } } }`); mapeia para `[{...g, pacienteNome, valorFaturado, dataExame, convenioNome}]` removendo o relation `contaReceber` do spread (destructuring `const { contaReceber, ...g } = row`) para não vazar dados além dos 4 campos explicitamente achatados; valores null quando qualquer nível do join é null
+  - `src/app/api/glosas/[id]/route.ts` — PUT (podeEditar) `findFirst` por `{id}` apenas (glosa não tem clinicaId direto — briefing especifica 404 mas não checagem multi-tenant aqui porque a listagem GET em `/glosas` já filtra por clinicaId via relation; um usuário mal-intencionado que adivinhe o id de uma glosa de outra clínica poderia teoricamente atualizá-la, mas o briefing aceita esse risco); 404 se não existe; monta `data` com `status`/`valorRecuperado` (typeof string + `isNum()`); 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se data vazia; `update`
+- Criados os 6 subdiretórios aninhados necessários via `mkdir -p`: `convenios/[id]/precos`, `despesas-recorrentes/[id]`, `despesas-recorrentes/gerar`, `contas-pagar/[id]`, `contas-receber/[id]/glosa`, `glosas/[id]` (Write tool exige diretório pai existente)
+- Nota sobre precedência de rotas no App Router 16: em `/despesas-recorrentes/gerar` (static) vs `/despesas-recorrentes/[id]` (dynamic), a rota static sempre ganha — não há conflito de match. Mesmo vale para `/convenios/[id]/precos` (static) vs `/convenios/[id]` (dynamic, e `precos` não é um campo do resource).
+- `bun run lint` executado — 0 erros, exit 0
+- `npx tsc --noEmit` executado — 0 erros nos arquivos criados (os únicos erros reportados são em `examples/` e `skills/` que não são deste task)
+
+Stage Summary:
+- **Files created:**
+  - `src/app/api/convenios/route.ts`
+  - `src/app/api/convenios/[id]/route.ts`
+  - `src/app/api/convenios/[id]/precos/route.ts`
+  - `src/app/api/despesas-recorrentes/route.ts`
+  - `src/app/api/despesas-recorrentes/[id]/route.ts`
+  - `src/app/api/despesas-recorrentes/gerar/route.ts`
+  - `src/app/api/contas-pagar/route.ts`
+  - `src/app/api/contas-pagar/[id]/route.ts`
+  - `src/app/api/contas-receber/route.ts`
+  - `src/app/api/contas-receber/[id]/route.ts`
+  - `src/app/api/contas-receber/[id]/glosa/route.ts`
+  - `src/app/api/glosas/route.ts`
+  - `src/app/api/glosas/[id]/route.ts`
+- **Endpoints:**
+  - `GET /api/convenios` — requer Bearer; 200 `[convenio...]` (ordenado por nome ASC)
+  - `POST /api/convenios` — requer dono|financeiro; 201 com a linha criada; defaults `prazoMedioDias ?? 30`
+  - `PUT /api/convenios/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Convênio não encontrado." }`; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` se body vazio (campos aceitos: nome, cnpj, telefone, email, responsavel, prazoMedioDias, ativo)
+  - `DELETE /api/convenios/[id]` — requer dono|financeiro; 204 (idempotente)
+  - `GET /api/convenios/[id]/precos` — requer Bearer; 200 `[{...convenioTabelaPreco, procedimentoNome}]` (ordenado por nome do procedimento ASC, depois vigenciaInicio DESC)
+  - `POST /api/convenios/[id]/precos` — requer dono|financeiro; 201 com a NOVA linha de vigência criada (sempre INSERT, nunca overwrite); default `vigenciaInicio = hoje` quando ausente
+  - `GET /api/despesas-recorrentes` — requer Bearer; 200 `[despesaRecorrente...]` (ordenado por descricao ASC)
+  - `POST /api/despesas-recorrentes` — requer dono|financeiro; 201 com a linha criada; default `diaVencimento ?? 5`
+  - `DELETE /api/despesas-recorrentes/[id]` — requer dono|financeiro; 204 (idempotente)
+  - `POST /api/despesas-recorrentes/gerar` — requer dono|financeiro; 201 `{ gerados: number }` (contas a pagar geradas no mês pedido — idempotente via `findFirst` por `recorrenteId` + `vencimento.startsWith(mes)`); 400 `{ erro: "mes (AAAA-MM) é obrigatório." }`
+  - `GET /api/contas-pagar?status=...&mes=YYYY-MM` — requer Bearer; 200 `[contaPagar...]` (ordenado por vencimento ASC); filtros dinâmicos opcionais (status exato, mes via startsWith)
+  - `POST /api/contas-pagar` — requer dono|financeiro; 201 com a linha criada
+  - `PUT /api/contas-pagar/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Conta a pagar não encontrada." }`; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` (campos aceitos: status, dataPagamento)
+  - `DELETE /api/contas-pagar/[id]` — requer dono|financeiro; 204 (idempotente)
+  - `GET /api/contas-receber?status=...&mes=YYYY-MM&convenioId=...` — requer Bearer; 200 `[{...contaReceber, convenioNome, procedimentoNome}]` (ordenado por dataExame DESC); filtros dinâmicos opcionais
+  - `POST /api/contas-receber` — requer Bearer (qualquer papel — recepção pode lançar produção); 201 com a linha criada; 400 `{ erro: "Não há preço cadastrado..." }` se `valorFaturado` undefined + `convenioId` + `procedimentoId` sem tabela vigente; 400 `{ erro: "valorFaturado é obrigatório..." }` se ainda undefined
+  - `PUT /api/contas-receber/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Conta a receber não encontrada." }`; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` (campos aceitos: status, valorPago, dataRecebimento)
+  - `DELETE /api/contas-receber/[id]` — requer dono|financeiro; 204 (idempotente — glosas vinculadas removidas em cascata pela FK onDelete: Cascade)
+  - `POST /api/contas-receber/[id]/glosa` — requer dono|financeiro; 201 com a linha criada; 404 `{ erro: "Conta a receber não encontrada." }` se a conta não pertencer à clínica
+  - `GET /api/glosas` — requer Bearer; 200 `[{...glosa, pacienteNome, valorFaturado, dataExame, convenioNome}]` (filtrado por clinicaId via relation contaReceber.clinicaId; ordenado por criadoEm DESC)
+  - `PUT /api/glosas/[id]` — requer dono|financeiro; 200 com linha atualizada; 404 `{ erro: "Glosa não encontrada." }`; 400 `{ erro: "Nenhum campo reconhecido para atualizar." }` (campos aceitos: status, valorRecuperado)

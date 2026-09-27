@@ -120,3 +120,132 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ---------- Tema do app de Precificação (clarear/escurecer + accent) ----------
+   Sobreposto às vars shadcn padrão pra chegar perto do visual do app Electron
+   original (paleta "stone" + acentos teal/azul/roxo). O seletor [data-accent]
+   permite trocar a cor de destaque sem mudar de tema.
+*/
+:root,
+[data-accent="teal"] {
+  --accent-app: #0f766e;
+  --accent-app-hover: #115e59;
+  --accent-app-text: #0f766e;
+  --accent-app-text-hover: #134e4a;
+  --accent-app-soft-bg: #f0fdfa;
+  --accent-app-soft-bg-strong: #ccfbf1;
+  --accent-app-soft-border: #99f6e4;
+
+  --bg-app: #fafaf9;
+  --bg-app-alt-strong: #e7e5e4;
+  --surface-app: #ffffff;
+  --border-app: #e7e5e4;
+  --border-app-subtle: #f5f5f4;
+  --border-app-strong: #d6d3d1;
+  --text-app: #1c1917;
+  --text-app-secondary: #44403c;
+  --text-app-muted: #78716c;
+  --text-app-faint: #a8a29e;
+
+  --danger-app: #dc2626;
+  --danger-app-faint: #f87171;
+  --danger-app-bg: #fef2f2;
+  --danger-app-bg-strong: #fee2e2;
+  --danger-app-border: #fee2e2;
+
+  --warning-app: #b45309;
+  --warning-app-strong: #78350f;
+  --warning-app-bg: #fffbeb;
+  --warning-app-bg-strong: #fef3c7;
+  --warning-app-border: #fef3c7;
+}
+
+[data-accent="blue"] {
+  --accent-app: #1d4ed8;
+  --accent-app-hover: #1e40af;
+  --accent-app-text: #1d4ed8;
+  --accent-app-text-hover: #1e3a8a;
+  --accent-app-soft-bg: #eff6ff;
+  --accent-app-soft-bg-strong: #dbeafe;
+  --accent-app-soft-border: #bfdbfe;
+}
+
+[data-accent="purple"] {
+  --accent-app: #7e22ce;
+  --accent-app-hover: #6b21a8;
+  --accent-app-text: #7e22ce;
+  --accent-app-text-hover: #581c87;
+  --accent-app-soft-bg: #faf5ff;
+  --accent-app-soft-bg-strong: #f3e8ff;
+  --accent-app-soft-border: #e9d5ff;
+}
+
+.dark,
+.dark[data-accent="teal"] {
+  --accent-app: #0f766e;
+  --accent-app-hover: #115e59;
+  --accent-app-text: #5eead4;
+  --accent-app-text-hover: #99f6e4;
+  --accent-app-soft-bg: #134e4a;
+  --accent-app-soft-bg-strong: #115e59;
+  --accent-app-soft-border: #0f766e;
+
+  --bg-app: #1c1917;
+  --bg-app-alt-strong: #44403c;
+  --surface-app: #292524;
+  --border-app: #44403c;
+  --border-app-subtle: #3f3a37;
+  --border-app-strong: #57534e;
+  --text-app: #fafaf9;
+  --text-app-secondary: #d6d3d1;
+  --text-app-muted: #a8a29e;
+  --text-app-faint: #78716c;
+
+  --danger-app: #f87171;
+  --danger-app-faint: #fca5a5;
+  --danger-app-bg: #450a0a;
+  --danger-app-bg-strong: #7f1d1d;
+  --danger-app-border: #7f1d1d;
+
+  --warning-app: #fbbf24;
+  --warning-app-strong: #fde68a;
+  --warning-app-bg: #451a03;
+  --warning-app-bg-strong: #78350f;
+  --warning-app-border: #78350f;
+}
+
+.dark[data-accent="blue"] {
+  --accent-app: #1d4ed8;
+  --accent-app-hover: #1e40af;
+  --accent-app-text: #93c5fd;
+  --accent-app-text-hover: #bfdbfe;
+  --accent-app-soft-bg: #1e3a8a;
+  --accent-app-soft-bg-strong: #1e40af;
+  --accent-app-soft-border: #1d4ed8;
+}
+
+.dark[data-accent="purple"] {
+  --accent-app: #7e22ce;
+  --accent-app-hover: #6b21a8;
+  --accent-app-text: #d8b4fe;
+  --accent-app-text-hover: #e9d5ff;
+  --accent-app-soft-bg: #581c87;
+  --accent-app-soft-bg-strong: #6b21a8;
+  --accent-app-soft-border: #7e22ce;
+}
+
+/* Scrollbar custom pra listas longas */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--border-app-strong);
+  border-radius: 4px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--text-app-faint);
+}

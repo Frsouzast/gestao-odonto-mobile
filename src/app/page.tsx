@@ -1,31 +1,19 @@
-'use client'
+"use client";
+
+import { useAuth } from "@/lib/auth-store";
+import { LoginScreen } from "@/components/auth/login-screen";
+import { AppShell } from "@/components/app/app-shell";
+import { ThemeApplier } from "@/components/app/theme-applier";
 
 export default function Home() {
+  const usuario = useAuth((s) => s.usuario);
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      gap: '2rem',
-      padding: '1rem'
-    }}>
-      <div style={{
-        position: 'relative',
-        width: '6rem',
-        height: '6rem'
-      }}>
-        <img
-          src="/logo.svg"
-          alt="Z.ai Logo"
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain'
-          }}
-        />
-      </div>
-    </div>
-  )
+    <>
+      <ThemeApplier />
+      <main className="min-h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-app)]">
+        {usuario ? <AppShell /> : <LoginScreen />}
+      </main>
+    </>
+  );
 }

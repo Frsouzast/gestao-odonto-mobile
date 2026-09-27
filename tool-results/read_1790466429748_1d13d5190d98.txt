@@ -1,0 +1,1556 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useMemo, useRef, useState } from "react";
+     4→     4→import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+     5→     5→import { motion } from "framer-motion";
+     6→     6→import {
+     7→     7→  Plus,
+     8→     8→  Trash2,
+     9→     9→  Pencil,
+    10→    10→  Calculator,
+    11→    11→  Save,
+    12→    12→  AlertTriangle,
+    13→    13→  TrendingUp,
+    14→    14→  Check,
+    15→    15→  RefreshCw,
+    16→    16→  Stethoscope,
+    17→    17→  Inbox,
+    18→    18→  Clock,
+    19→    19→  Package,
+    20→    20→} from "lucide-react";
+    21→    21→import { toast } from "sonner";
+    22→    22→
+    23→    23→import { apiFetch, useAuth } from "@/lib/auth-store";
+    24→    24→import { brl, num, pct } from "@/lib/utils";
+    25→    25→import { Card } from "@/components/ui/card";
+    26→    26→import { Button } from "@/components/ui/button";
+    27→    27→import { Input } from "@/components/ui/input";
+    28→    28→import { Label } from "@/components/ui/label";
+    29→    29→import { Skeleton } from "@/components/ui/skeleton";
+    30→    30→import { Badge } from "@/components/ui/badge";
+    31→    31→import {
+    32→    32→  Dialog,
+    33→    33→  DialogContent,
+    34→    34→  DialogHeader,
+    35→    35→  DialogTitle,
+    36→    36→  DialogFooter,
+    37→    37→  DialogClose,
+    38→    38→} from "@/components/ui/dialog";
+    39→    39→import {
+    40→    40→  AlertDialog,
+    41→    41→  AlertDialogContent,
+    42→    42→  AlertDialogHeader,
+    43→    43→  AlertDialogTitle,
+    44→    44→  AlertDialogDescription,
+    45→    45→  AlertDialogFooter,
+    46→    46→  AlertDialogCancel,
+    47→    47→  AlertDialogAction,
+    48→    48→  AlertDialogTrigger,
+    49→    49→} from "@/components/ui/alert-dialog";
+    50→    50→
+    51→    51→// ---------------------------------------------------------------------------
+    52→    52→// Types — mirror T2-c API contract (Prisma camelCase)
+    53→    53→// ---------------------------------------------------------------------------
+    54→    54→interface Procedimento {
+    55→    55→  id: string;
+    56→    56→  clinicaId: string;
+    57→    57→  nome: string;
+    58→    58→  tempoMinutos: number;
+    59→    59→  laudos: number;
+    60→    60→  retrabalhoPct: number;
+    61→    61→  comissaoPct: number;
+    62→    62→  lucroDesejadoPct: number;
+    63→    63→  inadimplenciaPct: number;
+    64→    64→  impostosPct: number;
+    65→    65→  taxaCartaoPct: number;
+    66→    66→  outrosPct: number;
+    67→    67→  precoConcorrencia: number | null;
+    68→    68→  precoFinal: number | null;
+    69→    69→  ativo: boolean;
+    70→    70→  equipamentoId: string | null;
+    71→    71→}
+    72→    72→
+    73→    73→interface ItemProcedimento {
+    74→    74→  insumoId: string;
+    75→    75→  quantidade: number;
+    76→    76→  insumoNome: string | null;
+    77→    77→}
+    78→    78→
+    79→    79→interface Ativo {
+    80→    80→  id: string;
+    81→    81→  clinicaId: string;
+    82→    82→  nome: string;
+    83→    83→  dataAquisicao: string | null;
+    84→    84→  valorAquisicao: number;
+    85→    85→  vidaUtilAnos: number;
+    86→    86→}
+    87→    87→
+    88→    88→interface Insumo {
+    89→    89→  id: string;
+    90→    90→  clinicaId: string;
+    91→    91→  nome: string;
+    92→    92→  unidade: string;
+    93→    93→  valorTotal: number;
+    94→    94→  quantidade: number;
+    95→    95→}
+    96→    96→
+    97→    97→interface ResultadoCalculo {
+    98→    98→  procedimento: string;
+    99→    99→  custoInsumos: number;
+   100→   100→  rateio: number;
+   101→   101→  retrabalhoValor: number;
+   102→   102→  custoDireto: number;
+   103→   103→  precoSugerido: number;
+   104→   104→  pontoEquilibrio: number;
+   105→   105→  lucratividadeFinal: number;
+   106→   106→}
+   107→   107→
+   108→   108→// ---------------------------------------------------------------------------
+   109→   109→// Shared style helpers (mirror T3-b custos-capacidade-tab)
+   110→   110→// ---------------------------------------------------------------------------
+   111→   111→const inputCls =
+   112→   112→  "bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app)] placeholder:text-[var(--text-app-faint)] focus-visible:border-[var(--accent-app)] focus-visible:ring-[var(--accent-app)]/25";
+   113→   113→
+   114→   114→// ---------------------------------------------------------------------------
+   115→   115→// Small UI primitives
+   116→   116→// ---------------------------------------------------------------------------
+   117→   117→function EmptyState({
+   118→   118→  icon,
+   119→   119→  title,
+   120→   120→  hint,
+   121→   121→  action,
+   122→   122→}: {
+   123→   123→  icon: React.ReactNode;
+   124→   124→  title: string;
+   125→   125→  hint?: string;
+   126→   126→  action?: React.ReactNode;
+   127→   127→}) {
+   128→   128→  return (
+   129→   129→    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+   130→   130→      <div className="w-12 h-12 rounded-full bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)] grid place-items-center mb-3">
+   131→   131→        {icon}
+   132→   132→      </div>
+   133→   133→      <div className="text-sm font-medium text-[var(--text-app)]">{title}</div>
+   134→   134→      {hint && (
+   135→   135→        <div className="text-xs text-[var(--text-app-muted)] mt-1 max-w-sm">
+   136→   136→          {hint}
+   137→   137→        </div>
+   138→   138→      )}
+   139→   139→      {action && <div className="mt-4">{action}</div>}
+   140→   140→    </div>
+   141→   141→  );
+   142→   142→}
+   143→   143→
+   144→   144→function ErrorState({
+   145→   145→  message,
+   146→   146→  onRetry,
+   147→   147→}: {
+   148→   148→  message: string;
+   149→   149→  onRetry: () => void;
+   150→   150→}) {
+   151→   151→  return (
+   152→   152→    <div className="flex flex-col items-center justify-center py-8 px-4 text-center gap-3">
+   153→   153→      <AlertTriangle
+   154→   154→        size={28}
+   155→   155→        className="text-[var(--danger-app)]"
+   156→   156→        strokeWidth={1.5}
+   157→   157→      />
+   158→   158→      <div className="text-sm text-[var(--text-app)]">Erro ao carregar</div>
+   159→   159→      <div className="text-xs text-[var(--text-app-muted)] max-w-md">
+   160→   160→        {message}
+   161→   161→      </div>
+   162→   162→      <Button
+   163→   163→        type="button"
+   164→   164→        variant="outline"
+   165→   165→        size="sm"
+   166→   166→        onClick={onRetry}
+   167→   167→        className="bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)]"
+   168→   168→      >
+   169→   169→        <RefreshCw size={13} /> Tentar novamente
+   170→   170→      </Button>
+   171→   171→    </div>
+   172→   172→  );
+   173→   173→}
+   174→   174→
+   175→   175→function ListSkeleton() {
+   176→   176→  return (
+   177→   177→    <div className="space-y-2 px-2 py-2">
+   178→   178→      {Array.from({ length: 4 }).map((_, i) => (
+   179→   179→        <Skeleton
+   180→   180→          key={i}
+   181→   181→          className="h-12 w-full bg-[var(--bg-app-alt-strong)]"
+   182→   182→        />
+   183→   183→      ))}
+   184→   184→    </div>
+   185→   185→  );
+   186→   186→}
+   187→   187→
+   188→   188→function CalcSkeleton() {
+   189→   189→  return (
+   190→   190→    <div className="space-y-3">
+   191→   191→      <div className="rounded-md border border-[var(--border-app-subtle)]">
+   192→   192→        {Array.from({ length: 4 }).map((_, i) => (
+   193→   193→          <Skeleton
+   194→   194→            key={i}
+   195→   195→            className="h-9 w-full bg-[var(--bg-app-alt-strong)] rounded-none"
+   196→   196→          />
+   197→   197→        ))}
+   198→   198→      </div>
+   199→   199→      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   200→   200→        {Array.from({ length: 2 }).map((_, i) => (
+   201→   201→          <Skeleton
+   202→   202→            key={i}
+   203→   203→            className="h-24 bg-[var(--bg-app-alt-strong)]"
+   204→   204→          />
+   205→   205→        ))}
+   206→   206→      </div>
+   207→   207→    </div>
+   208→   208→  );
+   209→   209→}
+   210→   210→
+   211→   211→function CalcLine({
+   212→   212→  label,
+   213→   213→  value,
+   214→   214→  accent,
+   215→   215→  warning,
+   216→   216→  danger,
+   217→   217→}: {
+   218→   218→  label: string;
+   219→   219→  value: string;
+   220→   220→  accent?: boolean;
+   221→   221→  warning?: boolean;
+   222→   222→  danger?: boolean;
+   223→   223→}) {
+   224→   224→  return (
+   225→   225→    <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-[var(--border-app-subtle)] last:border-0">
+   226→   226→      <span className="text-xs text-[var(--text-app-muted)]">{label}</span>
+   227→   227→      <span
+   228→   228→        className={`text-sm font-mono tabular-nums ${
+   229→   229→          accent
+   230→   230→            ? "text-[var(--accent-app-text)]"
+   231→   231→            : warning
+   232→   232→            ? "text-[var(--warning-app)]"
+   233→   233→            : danger
+   234→   234→            ? "text-[var(--danger-app)]"
+   235→   235→            : "text-[var(--text-app)]"
+   236→   236→        }`}
+   237→   237→      >
+   238→   238→        {value}
+   239→   239→      </span>
+   240→   240→    </div>
+   241→   241→  );
+   242→   242→}
+   243→   243→
+   244→   244→// ---------------------------------------------------------------------------
+   245→   245→// Helpers
+   246→   246→// ---------------------------------------------------------------------------
+   247→   247→const FIELD_LABELS: Record<string, string> = {
+   248→   248→  nome: "nome",
+   249→   249→  tempoMinutos: "tempo",
+   250→   250→  laudos: "laudos",
+   251→   251→  retrabalhoPct: "retrabalho",
+   252→   252→  comissaoPct: "comissão",
+   253→   253→  lucroDesejadoPct: "lucro",
+   254→   254→  inadimplenciaPct: "inadimplência",
+   255→   255→  impostosPct: "impostos",
+   256→   256→  taxaCartaoPct: "taxa de cartão",
+   257→   257→  outrosPct: "outros",
+   258→   258→  precoConcorrencia: "concorrência",
+   259→   259→  equipamentoId: "equipamento",
+   260→   260→};
+   261→   261→
+   262→   262→function labelForField(field: string): string {
+   263→   263→  return FIELD_LABELS[field] ?? field;
+   264→   264→}
+   265→   265→
+   266→   266→function round2(n: number): number {
+   267→   267→  if (!isFinite(n)) return 0;
+   268→   268→  return Math.round(n * 100) / 100;
+   269→   269→}
+   270→   270→
+   271→   271→// ---------------------------------------------------------------------------
+   272→   272→// 1. Main tab — two-pane responsive layout
+   273→   273→// ---------------------------------------------------------------------------
+   274→   274→export function ProcedimentosTab() {
+   275→   275→  const podeEditar = useAuth((s) => s.podeEditar());
+   276→   276→
+   277→   277→  const q = useQuery<Procedimento[]>({
+   278→   278→    queryKey: ["procedimentos"],
+   279→   279→    queryFn: () => apiFetch<Procedimento[]>("/api/procedimentos"),
+   280→   280→  });
+   281→   281→
+   282→   282→  const [selectedId, setSelectedId] = useState<string | null>(null);
+   283→   283→
+   284→   284→  // Derived effective selection (no setState-in-effect) — auto-selects the
+   285→   285→  // first item once data arrives and falls back when the selected id is no
+   286→   286→  // longer in the list (e.g., after a delete).
+   287→   287→  const effectiveSelectedId = useMemo(() => {
+   288→   288→    const list = q.data ?? [];
+   289→   289→    if (list.length === 0) return null;
+   290→   290→    if (selectedId && list.some((p) => p.id === selectedId)) return selectedId;
+   291→   291→    return list[0].id;
+   292→   292→  }, [q.data, selectedId]);
+   293→   293→
+   294→   294→  return (
+   295→   295→    <div className="h-full overflow-y-auto scroll-thin">
+   296→   296→      <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 p-4 lg:p-6">
+   297→   297→        <ProcedimentosListPane
+   298→   298→          procedimentos={q.data ?? []}
+   299→   299→          loading={q.isLoading}
+   300→   300→          error={q.error}
+   301→   301→          selectedId={effectiveSelectedId}
+   302→   302→          onSelect={setSelectedId}
+   303→   303→          onRefetch={() => q.refetch()}
+   304→   304→        />
+   305→   305→        {effectiveSelectedId ? (
+   306→   306→          <ProcedimentoDetalhe key={effectiveSelectedId} procedimentoId={effectiveSelectedId} podeEditar={podeEditar} />
+   307→   307→        ) : (
+   308→   308→          <EmptyDetailPane hasProcedimentos={(q.data ?? []).length > 0} podeEditar={podeEditar} />
+   309→   309→        )}
+   310→   310→      </div>
+   311→   311→    </div>
+   312→   312→  );
+   313→   313→}
+   314→   314→
+   315→   315→// ---------------------------------------------------------------------------
+   316→   316→// 2. List pane
+   317→   317→// ---------------------------------------------------------------------------
+   318→   318→function ProcedimentosListPane({
+   319→   319→  procedimentos,
+   320→   320→  loading,
+   321→   321→  error,
+   322→   322→  selectedId,
+   323→   323→  onSelect,
+   324→   324→  onRefetch,
+   325→   325→}: {
+   326→   326→  procedimentos: Procedimento[];
+   327→   327→  loading: boolean;
+   328→   328→  error: Error | null;
+   329→   329→  selectedId: string | null;
+   330→   330→  onSelect: (id: string) => void;
+   331→   331→  onRefetch: () => void;
+   332→   332→}) {
+   333→   333→  const podeEditar = useAuth((s) => s.podeEditar());
+   334→   334→  const queryClient = useQueryClient();
+   335→   335→  const [novoOpen, setNovoOpen] = useState(false);
+   336→   336→  const [novoNome, setNovoNome] = useState("");
+   337→   337→
+   338→   338→  const addMut = useMutation({
+   339→   339→    mutationFn: (nome: string) =>
+   340→   340→      apiFetch<Procedimento>("/api/procedimentos", {
+   341→   341→        method: "POST",
+   342→   342→        body: JSON.stringify({ nome }),
+   343→   343→      }),
+   344→   344→    onSuccess: (novo) => {
+   345→   345→      queryClient.invalidateQueries({ queryKey: ["procedimentos"] });
+   346→   346→      setNovoOpen(false);
+   347→   347→      setNovoNome("");
+   348→   348→      toast.success("Procedimento criado");
+   349→   349→      onSelect(novo.id);
+   350→   350→    },
+   351→   351→    onError: (e: Error) => toast.error(e.message),
+   352→   352→  });
+   353→   353→
+   354→   354→  return (
+   355→   355→    <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none self-start">
+   356→   356→      <div className="px-4 py-3 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
+   357→   357→        <div className="flex items-center gap-2">
+   358→   358→          <Stethoscope size={16} className="text-[var(--text-app-muted)]" />
+   359→   359→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+   360→   360→            Procedimentos
+   361→   361→          </h3>
+   362→   362→          <span className="text-[11px] text-[var(--text-app-muted)]">
+   363→   363→            {procedimentos.length}
+   364→   364→          </span>
+   365→   365→        </div>
+   366→   366→        {podeEditar && (
+   367→   367→          <Button
+   368→   368→            type="button"
+   369→   369→            size="sm"
+   370→   370→            onClick={() => setNovoOpen(true)}
+   371→   371→            className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)] h-8"
+   372→   372→          >
+   373→   373→            <Plus size={14} /> Novo
+   374→   374→          </Button>
+   375→   375→        )}
+   376→   376→      </div>
+   377→   377→
+   378→   378→      {loading ? (
+   379→   379→        <ListSkeleton />
+   380→   380→      ) : error ? (
+   381→   381→        <ErrorState message={error.message} onRetry={onRefetch} />
+   382→   382→      ) : procedimentos.length === 0 ? (
+   383→   383→        <EmptyState
+   384→   384→          icon={<Inbox size={22} strokeWidth={1.5} />}
+   385→   385→          title="Nenhum procedimento"
+   386→   386→          hint={
+   387→   387→            podeEditar
+   388→   388→              ? "Crie o primeiro procedimento para começar a precificar."
+   389→   389→              : "Aguarde o gestor cadastrar procedimentos."
+   390→   390→          }
+   391→   391→          action={
+   392→   392→            podeEditar ? (
+   393→   393→              <Button
+   394→   394→                type="button"
+   395→   395→                size="sm"
+   396→   396→                onClick={() => setNovoOpen(true)}
+   397→   397→                className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)]"
+   398→   398→              >
+   399→   399→                <Plus size={14} /> Criar procedimento
+   400→   400→              </Button>
+   401→   401→            ) : undefined
+   402→   402→          }
+   403→   403→        />
+   404→   404→      ) : (
+   405→   405→        <div className="max-h-80 overflow-y-auto scroll-thin py-1">
+   406→   406→          {procedimentos.map((p) => {
+   407→   407→            const active = p.id === selectedId;
+   408→   408→            return (
+   409→   409→              <button
+   410→   410→                key={p.id}
+   411→   411→                type="button"
+   412→   412→                onClick={() => onSelect(p.id)}
+   413→   413→                className={`w-full text-left px-3 py-2 text-sm transition-colors border-l-2 ${
+   414→   414→                  active
+   415→   415→                    ? "bg-[var(--accent-app-soft-bg)] border-[var(--accent-app)] text-[var(--text-app)]"
+   416→   416→                    : "bg-transparent border-transparent hover:bg-[var(--bg-app-alt-strong)]/60 text-[var(--text-app)]"
+   417→   417→                }`}
+   418→   418→              >
+   419→   419→                <div className="flex items-center justify-between gap-2">
+   420→   420→                  <span className="truncate font-medium">
+   421→   421→                    {p.nome || "(sem nome)"}
+   422→   422→                  </span>
+   423→   423→                  {p.precoFinal != null && p.precoFinal > 0 && (
+   424→   424→                    <span className="text-[11px] font-mono tabular-nums text-[var(--text-app-muted)] shrink-0">
+   425→   425→                      {brl(p.precoFinal)}
+   426→   426→                    </span>
+   427→   427→                  )}
+   428→   428→                </div>
+   429→   429→                <div className="flex items-center gap-3 text-[11px] text-[var(--text-app-faint)] mt-0.5">
+   430→   430→                  <span className="flex items-center gap-1">
+   431→   431→                    <Clock size={11} /> {num(p.tempoMinutos)} min
+   432→   432→                  </span>
+   433→   433→                </div>
+   434→   434→              </button>
+   435→   435→            );
+   436→   436→          })}
+   437→   437→        </div>
+   438→   438→      )}
+   439→   439→
+   440→   440→      {/* New procedimento dialog */}
+   441→   441→      <Dialog open={novoOpen} onOpenChange={setNovoOpen}>
+   442→   442→        <DialogContent className="bg-[var(--surface-app)] border-[var(--border-app)]">
+   443→   443→          <DialogHeader>
+   444→   444→            <DialogTitle className="text-[var(--text-app)]">
+   445→   445→              Novo procedimento
+   446→   446→            </DialogTitle>
+   447→   447→          </DialogHeader>
+   448→   448→          <div className="py-2">
+   449→   449→            <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+   450→   450→              Nome do procedimento
+   451→   451→            </Label>
+   452→   452→            <Input
+   453→   453→              value={novoNome}
+   454→   454→              onChange={(e) => setNovoNome(e.target.value)}
+   455→   455→              placeholder="Ex.: Radiografia panorâmica, Periapical, Tratamento de canal…"
+   456→   456→              className={inputCls}
+   457→   457→              autoFocus
+   458→   458→              onKeyDown={(e) => {
+   459→   459→                if (e.key === "Enter") {
+   460→   460→                  const v = novoNome.trim();
+   461→   461→                  if (v) addMut.mutate(v);
+   462→   462→                }
+   463→   463→              }}
+   464→   464→            />
+   465→   465→            <p className="text-[11px] text-[var(--text-app-muted)] mt-2">
+   466→   466→              Os demais parâmetros (tempo, percentuais, insumos) podem ser
+   467→   467→              ajustados depois na tela de edição.
+   468→   468→            </p>
+   469→   469→          </div>
+   470→   470→          <DialogFooter>
+   471→   471→            <DialogClose asChild>
+   472→   472→              <Button
+   473→   473→                type="button"
+   474→   474→                variant="outline"
+   475→   475→                className="bg-transparent border-[var(--border-app)] text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)]"
+   476→   476→              >
+   477→   477→                Cancelar
+   478→   478→              </Button>
+   479→   479→            </DialogClose>
+   480→   480→            <Button
+   481→   481→              type="button"
+   482→   482→              onClick={() => {
+   483→   483→                const v = novoNome.trim();
+   484→   484→                if (!v) {
+   485→   485→                  toast.error("Informe o nome");
+   486→   486→                  return;
+   487→   487→                }
+   488→   488→                addMut.mutate(v);
+   489→   489→              }}
+   490→   490→              disabled={addMut.isPending}
+   491→   491→              className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)]"
+   492→   492→            >
+   493→   493→              {addMut.isPending ? "Criando…" : "Criar procedimento"}
+   494→   494→            </Button>
+   495→   495→          </DialogFooter>
+   496→   496→        </DialogContent>
+   497→   497→      </Dialog>
+   498→   498→    </Card>
+   499→   499→  );
+   500→   500→}
+   501→   501→
+   502→   502→// Empty right pane when nothing is selected
+   503→   503→function EmptyDetailPane({
+   504→   504→  hasProcedimentos,
+   505→   505→  podeEditar,
+   506→   506→}: {
+   507→   507→  hasProcedimentos: boolean;
+   508→   508→  podeEditar: boolean;
+   509→   509→}) {
+   510→   510→  return (
+   511→   511→    <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   512→   512→      <EmptyState
+   513→   513→        icon={<Calculator size={24} strokeWidth={1.5} />}
+   514→   514→        title={
+   515→   515→          hasProcedimentos
+   516→   516→            ? "Selecione um procedimento"
+   517→   517→            : "Sem procedimento selecionado"
+   518→   518→        }
+   519→   519→        hint={
+   520→   520→          hasProcedimentos
+   521→   521→            ? "Escolha um item da lista à esquerda para ver os parâmetros, insumos consumidos e o cálculo de preço."
+   522→   522→            : podeEditar
+   523→   523→            ? "Crie o primeiro procedimento para ver detalhes e o cálculo de preço."
+   524→   524→            : "Aguarde o gestor cadastrar procedimentos."
+   525→   525→        }
+   526→   526→      />
+   527→   527→    </Card>
+   528→   528→  );
+   529→   529→}
+   530→   530→
+   531→   531→// ---------------------------------------------------------------------------
+   532→   532→// 3. Detail pane
+   533→   533→// ---------------------------------------------------------------------------
+   534→   534→function ProcedimentoDetalhe({
+   535→   535→  procedimentoId,
+   536→   536→  podeEditar,
+   537→   537→}: {
+   538→   538→  procedimentoId: string;
+   539→   539→  podeEditar: boolean;
+   540→   540→}) {
+   541→   541→  const queryClient = useQueryClient();
+   542→   542→
+   543→   543→  // Read procedimento from the cached list (shared queryKey, no extra fetch)
+   544→   544→  const procQ = useQuery<Procedimento | null>({
+   545→   545→    queryKey: ["procedimentos"],
+   546→   546→    queryFn: () => apiFetch<Procedimento[]>("/api/procedimentos"),
+   547→   547→    select: (list) => list.find((p) => p.id === procedimentoId) ?? null,
+   548→   548→  });
+   549→   549→
+   550→   550→  // Lookup data for the dropdowns
+   551→   551→  const insumosQ = useQuery<Insumo[]>({
+   552→   552→    queryKey: ["insumos"],
+   553→   553→    queryFn: () => apiFetch<Insumo[]>("/api/insumos"),
+   554→   554→  });
+   555→   555→  const ativosQ = useQuery<Ativo[]>({
+   556→   556→    queryKey: ["ativos"],
+   557→   557→    queryFn: () => apiFetch<Ativo[]>("/api/ativos"),
+   558→   558→  });
+   559→   559→
+   560→   560→  // Items of this procedimento
+   561→   561→  const itensQ = useQuery<ItemProcedimento[]>({
+   562→   562→    queryKey: ["procedimentos", procedimentoId, "itens"],
+   563→   563→    queryFn: () =>
+   564→   564→      apiFetch<ItemProcedimento[]>(
+   565→   565→        `/api/procedimentos/${procedimentoId}/itens`
+   566→   566→      ),
+   567→   567→  });
+   568→   568→
+   569→   569→  // Calculo (400 = capacidade ausente — exibe banner em vez de erro)
+   570→   570→  const calcQ = useQuery<ResultadoCalculo>({
+   571→   571→    queryKey: ["procedimentos", procedimentoId, "calculo"],
+   572→   572→    queryFn: async () => {
+   573→   573→      // Distinguishes 400 (capacidade ausente) from other errors so we can
+   574→   574→      // show a friendly banner instead of a hard error.
+   575→   575→      const res = await fetch(
+   576→   576→        `/api/procedimentos/${procedimentoId}/calculo`,
+   577→   577→        {
+   578→   578→          headers: {
+   579→   579→            Authorization: `Bearer ${useAuth.getState().token ?? ""}`,
+   580→   580→          },
+   581→   581→        }
+   582→   582→      );
+   583→   583→      const body = await res.json().catch(() => null);
+   584→   584→      if (!res.ok) {
+   585→   585→        throw new Error(
+   586→   586→          (body && (body.erro || body.error || body.message)) ||
+   587→   587→            `Erro ${res.status}`
+   588→   588→        );
+   589→   589→      }
+   590→   590→      return body as ResultadoCalculo;
+   591→   591→    },
+   592→   592→    retry: false,
+   593→   593→  });
+   594→   594→
+   595→   595→  const proc = procQ.data ?? null;
+   596→   596→
+   597→   597→  // PUT mutation (single-field inline update on blur)
+   598→   598→  const putMut = useMutation({
+   599→   599→    mutationFn: (vars: {
+   600→   600→      id: string;
+   601→   601→      field: string;
+   602→   602→      value: number | string | null;
+   603→   603→    }) =>
+   604→   604→      apiFetch<Procedimento>(`/api/procedimentos/${vars.id}`, {
+   605→   605→        method: "PUT",
+   606→   606→        body: JSON.stringify({ [vars.field]: vars.value }),
+   607→   607→      }),
+   608→   608→    onSuccess: () => {
+   609→   609→      queryClient.invalidateQueries({ queryKey: ["procedimentos"] });
+   610→   610→      queryClient.invalidateQueries({
+   611→   611→        queryKey: ["procedimentos", procedimentoId, "calculo"],
+   612→   612→      });
+   613→   613→    },
+   614→   614→    onError: (e: Error) => toast.error(e.message),
+   615→   615→  });
+   616→   616→
+   617→   617→  // DELETE mutation (soft delete)
+   618→   618→  const delMut = useMutation({
+   619→   619→    mutationFn: (id: string) =>
+   620→   620→      apiFetch<void>(`/api/procedimentos/${id}`, { method: "DELETE" }),
+   621→   621→    onSuccess: () => {
+   622→   622→      queryClient.invalidateQueries({ queryKey: ["procedimentos"] });
+   623→   623→      queryClient.removeQueries({
+   624→   624→        queryKey: ["procedimentos", procedimentoId],
+   625→   625→      });
+   626→   626→      toast.success("Procedimento removido");
+   627→   627→    },
+   628→   628→    onError: (e: Error) => toast.error(e.message),
+   629→   629→  });
+   630→   630→
+   631→   631→  // Items mutations
+   632→   632→  const addInsumoMut = useMutation({
+   633→   633→    mutationFn: (vars: { insumoId: string; quantidade: number }) =>
+   634→   634→      apiFetch<{
+   635→   635→        procedimentoId: string;
+   636→   636→        insumoId: string;
+   637→   637→        quantidade: number;
+   638→   638→      }>(`/api/procedimentos/${procedimentoId}/itens`, {
+   639→   639→        method: "POST",
+   640→   640→        body: JSON.stringify(vars),
+   641→   641→      }),
+   642→   642→    onSuccess: () => {
+   643→   643→      queryClient.invalidateQueries({
+   644→   644→        queryKey: ["procedimentos", procedimentoId, "itens"],
+   645→   645→      });
+   646→   646→      queryClient.invalidateQueries({
+   647→   647→        queryKey: ["procedimentos", procedimentoId, "calculo"],
+   648→   648→      });
+   649→   649→      toast.success("Insumo adicionado");
+   650→   650→    },
+   651→   651→    onError: (e: Error) => toast.error(e.message),
+   652→   652→  });
+   653→   653→
+   654→   654→  const updInsumoMut = useMutation({
+   655→   655→    mutationFn: (vars: { insumoId: string; quantidade: number }) =>
+   656→   656→      apiFetch<{
+   657→   657→        procedimentoId: string;
+   658→   658→        insumoId: string;
+   659→   659→        quantidade: number;
+   660→   660→      }>(`/api/procedimentos/${procedimentoId}/itens`, {
+   661→   661→        method: "POST",
+   662→   662→        body: JSON.stringify(vars),
+   663→   663→      }),
+   664→   664→    onSuccess: () => {
+   665→   665→      queryClient.invalidateQueries({
+   666→   666→        queryKey: ["procedimentos", procedimentoId, "itens"],
+   667→   667→      });
+   668→   668→      queryClient.invalidateQueries({
+   669→   669→        queryKey: ["procedimentos", procedimentoId, "calculo"],
+   670→   670→      });
+   671→   671→    },
+   672→   672→    onError: (e: Error) => toast.error(e.message),
+   673→   673→  });
+   674→   674→
+   675→   675→  const trocaInsumoMut = useMutation({
+   676→   676→    mutationFn: async (vars: {
+   677→   677→      insumoIdAntigo: string;
+   678→   678→      insumoIdNovo: string;
+   679→   679→      quantidade: number;
+   680→   680→    }) => {
+   681→   681→      if (vars.insumoIdNovo !== vars.insumoIdAntigo) {
+   682→   682→        await apiFetch<void>(
+   683→   683→          `/api/procedimentos/${procedimentoId}/itens/${vars.insumoIdAntigo}`,
+   684→   684→          { method: "DELETE" }
+   685→   685→        );
+   686→   686→      }
+   687→   687→      return apiFetch<{
+   688→   688→        procedimentoId: string;
+   689→   689→        insumoId: string;
+   690→   690→        quantidade: number;
+   691→   691→      }>(`/api/procedimentos/${procedimentoId}/itens`, {
+   692→   692→        method: "POST",
+   693→   693→        body: JSON.stringify({
+   694→   694→          insumoId: vars.insumoIdNovo,
+   695→   695→          quantidade: vars.quantidade,
+   696→   696→        }),
+   697→   697→      });
+   698→   698→    },
+   699→   699→    onSuccess: () => {
+   700→   700→      queryClient.invalidateQueries({
+   701→   701→        queryKey: ["procedimentos", procedimentoId, "itens"],
+   702→   702→      });
+   703→   703→      queryClient.invalidateQueries({
+   704→   704→        queryKey: ["procedimentos", procedimentoId, "calculo"],
+   705→   705→      });
+   706→   706→    },
+   707→   707→    onError: (e: Error) => toast.error(e.message),
+   708→   708→  });
+   709→   709→
+   710→   710→  const rmInsumoMut = useMutation({
+   711→   711→    mutationFn: (insumoId: string) =>
+   712→   712→      apiFetch<void>(
+   713→   713→        `/api/procedimentos/${procedimentoId}/itens/${insumoId}`,
+   714→   714→        { method: "DELETE" }
+   715→   715→      ),
+   716→   716→    onSuccess: () => {
+   717→   717→      queryClient.invalidateQueries({
+   718→   718→        queryKey: ["procedimentos", procedimentoId, "itens"],
+   719→   719→      });
+   720→   720→      queryClient.invalidateQueries({
+   721→   721→        queryKey: ["procedimentos", procedimentoId, "calculo"],
+   722→   722→      });
+   723→   723→      toast.success("Insumo removido");
+   724→   724→    },
+   725→   725→    onError: (e: Error) => toast.error(e.message),
+   726→   726→  });
+   727→   727→
+   728→   728→  // Preço final PUT — uncontrolled input read via ref
+   729→   729→  const precoInputRef = useRef<HTMLInputElement>(null);
+   730→   730→
+   731→   731→  const precoMut = useMutation({
+   732→   732→    mutationFn: (precoNovo: number) =>
+   733→   733→      apiFetch<void>(`/api/procedimentos/${procedimentoId}/preco-final`, {
+   734→   734→        method: "PUT",
+   735→   735→        body: JSON.stringify({ precoNovo }),
+   736→   736→      }),
+   737→   737→    onSuccess: () => {
+   738→   738→      queryClient.invalidateQueries({ queryKey: ["procedimentos"] });
+   739→   739→      queryClient.invalidateQueries({
+   740→   740→        queryKey: ["procedimentos", procedimentoId, "calculo"],
+   741→   741→      });
+   742→   742→      toast.success("Preço final definido");
+   743→   743→    },
+   744→   744→    onError: (e: Error) => toast.error(e.message),
+   745→   745→  });
+   746→   746→
+   747→   747→  // ----- Render states -----
+   748→   748→  if (procQ.isLoading) {
+   749→   749→    return (
+   750→   750→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   751→   751→        <div className="p-5 space-y-4">
+   752→   752→          <Skeleton className="h-8 w-2/3 bg-[var(--bg-app-alt-strong)]" />
+   753→   753→          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+   754→   754→            {Array.from({ length: 8 }).map((_, i) => (
+   755→   755→              <Skeleton
+   756→   756→                key={i}
+   757→   757→                className="h-16 bg-[var(--bg-app-alt-strong)]"
+   758→   758→              />
+   759→   759→            ))}
+   760→   760→          </div>
+   761→   761→          <Skeleton className="h-24 bg-[var(--bg-app-alt-strong)]" />
+   762→   762→        </div>
+   763→   763→      </Card>
+   764→   764→    );
+   765→   765→  }
+   766→   766→
+   767→   767→  if (!proc) {
+   768→   768→    return (
+   769→   769→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   770→   770→        <EmptyState
+   771→   771→          icon={<Inbox size={22} strokeWidth={1.5} />}
+   772→   772→          title="Procedimento não encontrado"
+   773→   773→          hint="Talvez ele tenha sido removido. Recarregue a lista."
+   774→   774→        />
+   775→   775→      </Card>
+   776→   776→    );
+   777→   777→  }
+   778→   778→
+   779→   779→  // ----- Commit helpers -----
+   780→   780→  function commitNum(
+   781→   781→    field: string,
+   782→   782→    rawValue: string,
+   783→   783→    original: number | null | undefined
+   784→   784→  ) {
+   785→   785→    const v = num(rawValue);
+   786→   786→    const orig = original ?? 0;
+   787→   787→    if (v === orig) return;
+   788→   788→    putMut.mutate({ id: procedimentoId, field, value: v });
+   789→   789→  }
+   790→   790→
+   791→   791→  function commitPct(
+   792→   792→    field: string,
+   793→   793→    rawValue: string,
+   794→   794→    original: number | null | undefined
+   795→   795→  ) {
+   796→   796→    // UI displays pct * 100 (e.g., 30 for 0.30) — divide by 100 on commit.
+   797→   797→    const v = num(rawValue) / 100;
+   798→   798→    const orig = original ?? 0;
+   799→   799→    if (v === orig) return;
+   800→   800→    putMut.mutate({ id: procedimentoId, field, value: v });
+   801→   801→  }
+   802→   802→
+   803→   803→  function commitStr(
+   804→   804→    field: string,
+   805→   805→    rawValue: string,
+   806→   806→    original: string | null | undefined
+   807→   807→  ) {
+   808→   808→    const v = rawValue.trim();
+   809→   809→    if (!v) {
+   810→   810→      toast.error("O campo não pode ser vazio");
+   811→   811→      return;
+   812→   812→    }
+   813→   813→    if (v === (original ?? "")) return;
+   814→   814→    putMut.mutate({ id: procedimentoId, field, value: v });
+   815→   815→  }
+   816→   816→
+   817→   817→  function commitEquipamento(rawValue: string) {
+   818→   818→    const v = rawValue;
+   819→   819→    if (v === (proc?.equipamentoId ?? "")) return;
+   820→   820→    if (!v) {
+   821→   821→      // API T2-c só aceita string (typeof check) — não é possível desvincular
+   822→   822→      // o equipamento via esta tela. Limitação documentada no worklog.
+   823→   823→      toast.info(
+   824→   824→        "Não é possível desvincular o equipamento por esta tela. Escolha outro equipamento para trocar."
+   825→   825→      );
+   826→   826→      return;
+   827→   827→    }
+   828→   828→    putMut.mutate({ id: procedimentoId, field: "equipamentoId", value: v });
+   829→   829→  }
+   830→   830→
+   831→   831→  // Insumo unit cost lookup (para a coluna "custo" da sub-tabela)
+   832→   832→  const insumos = insumosQ.data ?? [];
+   833→   833→  const unitCost = (insumoId: string): number => {
+   834→   834→    const i = insumos.find((x) => x.id === insumoId);
+   835→   835→    if (!i || !i.quantidade) return 0;
+   836→   836→    return i.valorTotal / i.quantidade;
+   837→   837→  };
+   838→   838→
+   839→   839→  const salvandoCampo =
+   840→   840→    putMut.isPending && putMut.variables ? putMut.variables.field : null;
+   841→   841→  const itens = itensQ.data ?? [];
+   842→   842→  const calc = calcQ.data;
+   843→   843→  const calcCapacidadeAusente =
+   844→   844→    calcQ.isError &&
+   845→   845→    (calcQ.error as Error)?.message
+   846→   846→      ?.toLowerCase()
+   847→   847→      .includes("capacidade produtiva");
+   848→   848→
+   849→   849→  function handleAddInsumo() {
+   850→   850→    if (!insumos.length) {
+   851→   851→      toast.error("Cadastre insumos na aba Custos & Capacidade antes");
+   852→   852→      return;
+   853→   853→    }
+   854→   854→    const jaUsados = new Set(itens.map((it) => it.insumoId));
+   855→   855→    const proximo = insumos.find((i) => !jaUsados.has(i.id));
+   856→   856→    if (!proximo) {
+   857→   857→      toast.error(
+   858→   858→        "Todos os insumos cadastrados já foram adicionados a este procedimento."
+   859→   859→      );
+   860→   860→      return;
+   861→   861→    }
+   862→   862→    addInsumoMut.mutate({ insumoId: proximo.id, quantidade: 1 });
+   863→   863→  }
+   864→   864→
+   865→   865→  return (
+   866→   866→    <motion.div
+   867→   867→      initial={{ opacity: 0, y: 4 }}
+   868→   868→      animate={{ opacity: 1, y: 0 }}
+   869→   869→      transition={{ duration: 0.2 }}
+   870→   870→      className="space-y-4"
+   871→   871→    >
+   872→   872→      {/* Header */}
+   873→   873→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   874→   874→        <div className="px-5 py-4 flex items-start justify-between gap-3">
+   875→   875→          <div className="flex-1 min-w-0">
+   876→   876→            <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+   877→   877→              Nome do procedimento
+   878→   878→            </Label>
+   879→   879→            <Input
+   880→   880→              defaultValue={proc.nome}
+   881→   881→              onBlur={(e) =>
+   882→   882→                commitStr("nome", e.currentTarget.value, proc.nome)
+   883→   883→              }
+   884→   884→              disabled={!podeEditar}
+   885→   885→              className={`${inputCls} ${podeEditar ? "" : "opacity-70"} text-base h-9`}
+   886→   886→            />
+   887→   887→          </div>
+   888→   888→          {podeEditar && (
+   889→   889→            <AlertDialog>
+   890→   890→              <AlertDialogTrigger asChild>
+   891→   891→                <Button
+   892→   892→                  type="button"
+   893→   893→                  variant="outline"
+   894→   894→                  size="icon"
+   895→   895→                  title="Remover procedimento"
+   896→   896→                  className="bg-transparent border-[var(--border-app)] text-[var(--text-app-muted)] hover:text-[var(--danger-app)] hover:bg-[var(--danger-app-bg)] hover:border-[var(--danger-app)]"
+   897→   897→                >
+   898→   898→                  <Trash2 size={15} />
+   899→   899→                </Button>
+   900→   900→              </AlertDialogTrigger>
+   901→   901→              <AlertDialogContent className="bg-[var(--surface-app)] border-[var(--border-app)]">
+   902→   902→                <AlertDialogHeader>
+   903→   903→                  <AlertDialogTitle className="text-[var(--text-app)]">
+   904→   904→                    Remover procedimento?
+   905→   905→                  </AlertDialogTitle>
+   906→   906→                  <AlertDialogDescription className="text-[var(--text-app-muted)]">
+   907→   907→                    {`O procedimento "${proc.nome}" será desativado (soft-delete). Histórico de preços e itens vinculados são preservados. Esta ação não pode ser desfeita pela interface.`}
+   908→   908→                  </AlertDialogDescription>
+   909→   909→                </AlertDialogHeader>
+   910→   910→                <AlertDialogFooter>
+   911→   911→                  <AlertDialogCancel className="bg-transparent border-[var(--border-app)] text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)]">
+   912→   912→                    Cancelar
+   913→   913→                  </AlertDialogCancel>
+   914→   914→                  <AlertDialogAction
+   915→   915→                    onClick={() => delMut.mutate(procedimentoId)}
+   916→   916→                    className="bg-[var(--danger-app)] text-white hover:bg-[var(--danger-app)]/90"
+   917→   917→                  >
+   918→   918→                    Remover
+   919→   919→                  </AlertDialogAction>
+   920→   920→                </AlertDialogFooter>
+   921→   921→              </AlertDialogContent>
+   922→   922→            </AlertDialog>
+   923→   923→          )}
+   924→   924→        </div>
+   925→   925→      </Card>
+   926→   926→
+   927→   927→      {/* Parâmetros */}
+   928→   928→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+   929→   929→        <div className="px-5 py-3 border-b border-[var(--border-app-subtle)] flex items-center gap-2">
+   930→   930→          <Pencil size={14} className="text-[var(--text-app-muted)]" />
+   931→   931→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+   932→   932→            Parâmetros
+   933→   933→          </h3>
+   934→   934→          {salvandoCampo && (
+   935→   935→            <span className="ml-auto text-[11px] text-[var(--text-app-muted)] flex items-center gap-1">
+   936→   936→              <Save size={11} className="animate-pulse" /> salvando{" "}
+   937→   937→              {labelForField(salvandoCampo)}…
+   938→   938→            </span>
+   939→   939→          )}
+   940→   940→        </div>
+   941→   941→        <div className="p-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+   942→   942→          {/* Tempo */}
+   943→   943→          <ParamField
+   944→   944→            label="Tempo (minutos)"
+   945→   945→            type="number"
+   946→   946→            step="1"
+   947→   947→            min="0"
+   948→   948→            defaultValue={num(proc.tempoMinutos)}
+   949→   949→            onBlur={(e) =>
+   950→   950→              commitNum("tempoMinutos", e.currentTarget.value, proc.tempoMinutos)
+   951→   951→            }
+   952→   952→            disabled={!podeEditar}
+   953→   953→            salvando={salvandoCampo === "tempoMinutos"}
+   954→   954→          />
+   955→   955→          {/* Laudos */}
+   956→   956→          <ParamField
+   957→   957→            label="Laudos / planej. (R$)"
+   958→   958→            type="number"
+   959→   959→            step="0.01"
+   960→   960→            min="0"
+   961→   961→            defaultValue={num(proc.laudos)}
+   962→   962→            onBlur={(e) =>
+   963→   963→              commitNum("laudos", e.currentTarget.value, proc.laudos)
+   964→   964→            }
+   965→   965→            disabled={!podeEditar}
+   966→   966→            salvando={salvandoCampo === "laudos"}
+   967→   967→          />
+   968→   968→          {/* Retrabalho */}
+   969→   969→          <ParamField
+   970→   970→            label="Retrabalho (%)"
+   971→   971→            type="number"
+   972→   972→            step="0.1"
+   973→   973→            min="0"
+   974→   974→            max="100"
+   975→   975→            defaultValue={round2(num(proc.retrabalhoPct) * 100)}
+   976→   976→            onBlur={(e) =>
+   977→   977→              commitPct("retrabalhoPct", e.currentTarget.value, proc.retrabalhoPct)
+   978→   978→            }
+   979→   979→            disabled={!podeEditar}
+   980→   980→            salvando={salvandoCampo === "retrabalhoPct"}
+   981→   981→          />
+   982→   982→          {/* Equipamento */}
+   983→   983→          <div>
+   984→   984→            <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+   985→   985→              Equipamento usado
+   986→   986→            </Label>
+   987→   987→            <select
+   988→   988→              value={proc.equipamentoId ?? ""}
+   989→   989→              onChange={(e) => commitEquipamento(e.target.value)}
+   990→   990→              disabled={!podeEditar || ativosQ.isLoading}
+   991→   991→              className={`w-full h-9 px-2 rounded-md border ${inputCls} ${
+   992→   992→                podeEditar ? "" : "opacity-70"
+   993→   993→              } text-sm bg-[var(--surface-app)]`}
+   994→   994→            >
+   995→   995→              <option value="">— nenhum —</option>
+   996→   996→              {(ativosQ.data ?? []).map((a) => (
+   997→   997→                <option key={a.id} value={a.id}>
+   998→   998→                  {a.nome}
+   999→   999→                </option>
+  1000→  1000→              ))}
+  1001→  1001→            </select>
+  1002→  1002→            <p className="text-[10px] text-[var(--text-app-faint)] mt-0.5">
+  1003→  1003→              alimenta a rentabilidade por hora no Financeiro
+  1004→  1004→            </p>
+  1005→  1005→          </div>
+  1006→  1006→          {/* Comissão */}
+  1007→  1007→          <ParamField
+  1008→  1008→            label="Comissão comercial (%)"
+  1009→  1009→            type="number"
+  1010→  1010→            step="0.1"
+  1011→  1011→            min="0"
+  1012→  1012→            defaultValue={round2(num(proc.comissaoPct) * 100)}
+  1013→  1013→            onBlur={(e) =>
+  1014→  1014→              commitPct("comissaoPct", e.currentTarget.value, proc.comissaoPct)
+  1015→  1015→            }
+  1016→  1016→            disabled={!podeEditar}
+  1017→  1017→            salvando={salvandoCampo === "comissaoPct"}
+  1018→  1018→          />
+  1019→  1019→          {/* Lucro desejado */}
+  1020→  1020→          <ParamField
+  1021→  1021→            label="Lucro desejado (%)"
+  1022→  1022→            type="number"
+  1023→  1023→            step="0.1"
+  1024→  1024→            min="0"
+  1025→  1025→            defaultValue={round2(num(proc.lucroDesejadoPct) * 100)}
+  1026→  1026→            onBlur={(e) =>
+  1027→  1027→              commitPct(
+  1028→  1028→                "lucroDesejadoPct",
+  1029→  1029→                e.currentTarget.value,
+  1030→  1030→                proc.lucroDesejadoPct
+  1031→  1031→              )
+  1032→  1032→            }
+  1033→  1033→            disabled={!podeEditar}
+  1034→  1034→            salvando={salvandoCampo === "lucroDesejadoPct"}
+  1035→  1035→          />
+  1036→  1036→          {/* Inadimplência */}
+  1037→  1037→          <ParamField
+  1038→  1038→            label="Inadimplência (%)"
+  1039→  1039→            type="number"
+  1040→  1040→            step="0.1"
+  1041→  1041→            min="0"
+  1042→  1042→            defaultValue={round2(num(proc.inadimplenciaPct) * 100)}
+  1043→  1043→            onBlur={(e) =>
+  1044→  1044→              commitPct(
+  1045→  1045→                "inadimplenciaPct",
+  1046→  1046→                e.currentTarget.value,
+  1047→  1047→                proc.inadimplenciaPct
+  1048→  1048→              )
+  1049→  1049→            }
+  1050→  1050→            disabled={!podeEditar}
+  1051→  1051→            salvando={salvandoCampo === "inadimplenciaPct"}
+  1052→  1052→          />
+  1053→  1053→          {/* Impostos */}
+  1054→  1054→          <ParamField
+  1055→  1055→            label="Impostos (%)"
+  1056→  1056→            type="number"
+  1057→  1057→            step="0.1"
+  1058→  1058→            min="0"
+  1059→  1059→            defaultValue={round2(num(proc.impostosPct) * 100)}
+  1060→  1060→            onBlur={(e) =>
+  1061→  1061→              commitPct("impostosPct", e.currentTarget.value, proc.impostosPct)
+  1062→  1062→            }
+  1063→  1063→            disabled={!podeEditar}
+  1064→  1064→            salvando={salvandoCampo === "impostosPct"}
+  1065→  1065→          />
+  1066→  1066→          {/* Taxa cartão */}
+  1067→  1067→          <ParamField
+  1068→  1068→            label="Taxa de cartão (%)"
+  1069→  1069→            type="number"
+  1070→  1070→            step="0.1"
+  1071→  1071→            min="0"
+  1072→  1072→            defaultValue={round2(num(proc.taxaCartaoPct) * 100)}
+  1073→  1073→            onBlur={(e) =>
+  1074→  1074→              commitPct("taxaCartaoPct", e.currentTarget.value, proc.taxaCartaoPct)
+  1075→  1075→            }
+  1076→  1076→            disabled={!podeEditar}
+  1077→  1077→            salvando={salvandoCampo === "taxaCartaoPct"}
+  1078→  1078→          />
+  1079→  1079→          {/* Outros */}
+  1080→  1080→          <ParamField
+  1081→  1081→            label="Outros (%)"
+  1082→  1082→            type="number"
+  1083→  1083→            step="0.1"
+  1084→  1084→            min="0"
+  1085→  1085→            defaultValue={round2(num(proc.outrosPct) * 100)}
+  1086→  1086→            onBlur={(e) =>
+  1087→  1087→              commitPct("outrosPct", e.currentTarget.value, proc.outrosPct)
+  1088→  1088→            }
+  1089→  1089→            disabled={!podeEditar}
+  1090→  1090→            salvando={salvandoCampo === "outrosPct"}
+  1091→  1091→          />
+  1092→  1092→          {/* Preço concorrência */}
+  1093→  1093→          <ParamField
+  1094→  1094→            label="Preço concorrência (R$)"
+  1095→  1095→            type="number"
+  1096→  1096→            step="0.01"
+  1097→  1097→            min="0"
+  1098→  1098→            defaultValue={proc.precoConcorrencia ?? ""}
+  1099→  1099→            onBlur={(e) => {
+  1100→  1100→              const v = e.currentTarget.value.trim();
+  1101→  1101→              if (v === "") {
+  1102→  1102→                if (proc.precoConcorrencia != null) {
+  1103→  1103→                  putMut.mutate({
+  1104→  1104→                    id: procedimentoId,
+  1105→  1105→                    field: "precoConcorrencia",
+  1106→  1106→                    value: 0,
+  1107→  1107→                  });
+  1108→  1108→                }
+  1109→  1109→                return;
+  1110→  1110→              }
+  1111→  1111→              commitNum(
+  1112→  1112→                "precoConcorrencia",
+  1113→  1113→                v,
+  1114→  1114→                proc.precoConcorrencia ?? 0
+  1115→  1115→              );
+  1116→  1116→            }}
+  1117→  1117→            disabled={!podeEditar}
+  1118→  1118→            salvando={salvandoCampo === "precoConcorrencia"}
+  1119→  1119→          />
+  1120→  1120→        </div>
+  1121→  1121→      </Card>
+  1122→  1122→
+  1123→  1123→      {/* Insumos consumidos */}
+  1124→  1124→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+  1125→  1125→        <div className="px-5 py-3 border-b border-[var(--border-app-subtle)] flex items-center justify-between gap-2">
+  1126→  1126→          <div className="flex items-center gap-2">
+  1127→  1127→            <Package size={14} className="text-[var(--text-app-muted)]" />
+  1128→  1128→            <h3 className="text-sm font-semibold text-[var(--text-app)]">
+  1129→  1129→              Insumos consumidos
+  1130→  1130→            </h3>
+  1131→  1131→            <span className="text-[11px] text-[var(--text-app-muted)]">
+  1132→  1132→              {itens.length}
+  1133→  1133→            </span>
+  1134→  1134→          </div>
+  1135→  1135→          {podeEditar && (
+  1136→  1136→            <Button
+  1137→  1137→              type="button"
+  1138→  1138→              size="sm"
+  1139→  1139→              onClick={handleAddInsumo}
+  1140→  1140→              disabled={addInsumoMut.isPending || !insumos.length}
+  1141→  1141→              className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)] h-8"
+  1142→  1142→            >
+  1143→  1143→              <Plus size={13} /> Adicionar insumo
+  1144→  1144→            </Button>
+  1145→  1145→          )}
+  1146→  1146→        </div>
+  1147→  1147→
+  1148→  1148→        {itensQ.isLoading ? (
+  1149→  1149→          <div className="p-4 space-y-2">
+  1150→  1150→            {Array.from({ length: 2 }).map((_, i) => (
+  1151→  1151→              <Skeleton
+  1152→  1152→                key={i}
+  1153→  1153→                className="h-10 w-full bg-[var(--bg-app-alt-strong)]"
+  1154→  1154→              />
+  1155→  1155→            ))}
+  1156→  1156→          </div>
+  1157→  1157→        ) : itens.length === 0 ? (
+  1158→  1158→          <EmptyState
+  1159→  1159→            icon={<Package size={22} strokeWidth={1.5} />}
+  1160→  1160→            title="Nenhum insumo associado"
+  1161→  1161→            hint={
+  1162→  1162→              podeEditar
+  1163→  1163→                ? "Adicione insumos para que o custo de materiais entre no cálculo."
+  1164→  1164→                : "Aguarde o gestor vincular insumos a este procedimento."
+  1165→  1165→            }
+  1166→  1166→          />
+  1167→  1167→        ) : (
+  1168→  1168→          <div className="max-h-80 overflow-y-auto scroll-thin">
+  1169→  1169→            <div className="grid grid-cols-[1fr_80px_110px_40px] gap-2 px-5 py-2 border-b border-[var(--border-app-subtle)] text-[11px] uppercase tracking-wide text-[var(--text-app-muted)]">
+  1170→  1170→              <div>Insumo</div>
+  1171→  1171→              <div className="text-right">Qtde</div>
+  1172→  1172→              <div className="text-right">Custo</div>
+  1173→  1173→              <div />
+  1174→  1174→            </div>
+  1175→  1175→            {itens.map((it) => {
+  1176→  1176→              const usedIds = new Set(
+  1177→  1177→                itens
+  1178→  1178→                  .filter((x) => x.insumoId !== it.insumoId)
+  1179→  1179→                  .map((x) => x.insumoId)
+  1180→  1180→              );
+  1181→  1181→              const saving =
+  1182→  1182→                (updInsumoMut.isPending &&
+  1183→  1183→                  updInsumoMut.variables?.insumoId === it.insumoId) ||
+  1184→  1184→                (trocaInsumoMut.isPending &&
+  1185→  1185→                  trocaInsumoMut.variables?.insumoIdAntigo === it.insumoId);
+  1186→  1186→              return (
+  1187→  1187→                <InsumoRow
+  1188→  1188→                  key={it.insumoId}
+  1189→  1189→                  item={it}
+  1190→  1190→                  insumos={insumos}
+  1191→  1191→                  usedInsumoIds={usedIds}
+  1192→  1192→                  podeEditar={podeEditar}
+  1193→  1193→                  custoUnitario={unitCost(it.insumoId)}
+  1194→  1194→                  onTrocarInsumo={(novoId, quantidade) =>
+  1195→  1195→                    trocaInsumoMut.mutate({
+  1196→  1196→                      insumoIdAntigo: it.insumoId,
+  1197→  1197→                      insumoIdNovo: novoId,
+  1198→  1198→                      quantidade,
+  1199→  1199→                    })
+  1200→  1200→                  }
+  1201→  1201→                  onSalvarQuantidade={(quantidade) =>
+  1202→  1202→                    updInsumoMut.mutate({ insumoId: it.insumoId, quantidade })
+  1203→  1203→                  }
+  1204→  1204→                  onRemover={() => rmInsumoMut.mutate(it.insumoId)}
+  1205→  1205→                  salvando={saving}
+  1206→  1206→                />
+  1207→  1207→              );
+  1208→  1208→            })}
+  1209→  1209→          </div>
+  1210→  1210→        )}
+  1211→  1211→      </Card>
+  1212→  1212→
+  1213→  1213→      {/* Resultado do cálculo */}
+  1214→  1214→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+  1215→  1215→        <div className="px-5 py-3 border-b border-[var(--border-app-subtle)] flex items-center gap-2">
+  1216→  1216→          <Calculator size={14} className="text-[var(--text-app-muted)]" />
+  1217→  1217→          <h3 className="text-sm font-semibold text-[var(--text-app)]">
+  1218→  1218→            Resultado do cálculo
+  1219→  1219→          </h3>
+  1220→  1220→          {calcQ.isFetching && !calcQ.isLoading && (
+  1221→  1221→            <span className="ml-auto text-[11px] text-[var(--text-app-muted)]">
+  1222→  1222→              recalculando…
+  1223→  1223→            </span>
+  1224→  1224→          )}
+  1225→  1225→        </div>
+  1226→  1226→
+  1227→  1227→        {calcQ.isLoading ? (
+  1228→  1228→          <div className="p-5">
+  1229→  1229→            <CalcSkeleton />
+  1230→  1230→          </div>
+  1231→  1231→        ) : calcCapacidadeAusente ? (
+  1232→  1232→          <div className="m-5 flex items-start gap-3 bg-[var(--warning-app-bg)]/40 border-l-2 border-[var(--warning-app)] rounded-md p-4">
+  1233→  1233→            <AlertTriangle
+  1234→  1234→              size={18}
+  1235→  1235→              className="text-[var(--warning-app)] shrink-0 mt-0.5"
+  1236→  1236→            />
+  1237→  1237→            <div>
+  1238→  1238→              <div className="text-sm font-medium text-[var(--text-app)]">
+  1239→  1239→                Capacidade produtiva não configurada
+  1240→  1240→              </div>
+  1241→  1241→              <p className="text-xs text-[var(--text-app-muted)] mt-1">
+  1242→  1242→                Configure a capacidade produtiva na aba{" "}
+  1243→  1243→                <span className="font-medium">Custos & Capacidade</span> para
+  1244→  1244→                que o rateio de custo fixo por minuto entre no cálculo.
+  1245→  1245→              </p>
+  1246→  1246→            </div>
+  1247→  1247→          </div>
+  1248→  1248→        ) : calcQ.isError ? (
+  1249→  1249→          <div className="p-5">
+  1250→  1250→            <ErrorState
+  1251→  1251→              message={(calcQ.error as Error)?.message ?? "Falha ao calcular"}
+  1252→  1252→              onRetry={() => calcQ.refetch()}
+  1253→  1253→            />
+  1254→  1254→          </div>
+  1255→  1255→        ) : calc ? (
+  1256→  1256→          <div className="p-5 space-y-4">
+  1257→  1257→            {/* Line items */}
+  1258→  1258→            <div className="rounded-md border border-[var(--border-app-subtle)] overflow-hidden">
+  1259→  1259→              <CalcLine
+  1260→  1260→                label="Custo de insumos"
+  1261→  1261→                value={brl(calc.custoInsumos)}
+  1262→  1262→              />
+  1263→  1263→              <CalcLine label="Rateio custo fixo" value={brl(calc.rateio)} />
+  1264→  1264→              <CalcLine
+  1265→  1265→                label="Retrabalho / desperdício"
+  1266→  1266→                value={brl(calc.retrabalhoValor)}
+  1267→  1267→              />
+  1268→  1268→              <CalcLine
+  1269→  1269→                label="Custo direto total"
+  1270→  1270→                value={brl(calc.custoDireto)}
+  1271→  1271→                accent
+  1272→  1272→              />
+  1273→  1273→            </div>
+  1274→  1274→
+  1275→  1275→            {/* Preço sugerido + ponto de equilíbrio */}
+  1276→  1276→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1277→  1277→              <div className="rounded-md border border-[var(--accent-app-soft-border)] bg-[var(--accent-app-soft-bg)] p-4">
+  1278→  1278→                <div className="text-[11px] uppercase tracking-wide text-[var(--accent-app-text)]/80">
+  1279→  1279→                  Preço sugerido
+  1280→  1280→                </div>
+  1281→  1281→                <div className="text-2xl font-mono tabular-nums text-[var(--accent-app-text)] mt-1">
+  1282→  1282→                  {brl(calc.precoSugerido)}
+  1283→  1283→                </div>
+  1284→  1284→                <div className="text-[11px] text-[var(--text-app-muted)] mt-1">
+  1285→  1285→                  cobre custos + lucro desejado
+  1286→  1286→                </div>
+  1287→  1287→              </div>
+  1288→  1288→              <div className="rounded-md border border-[var(--warning-app-border)] bg-[var(--warning-app-bg)] p-4">
+  1289→  1289→                <div className="text-[11px] uppercase tracking-wide text-[var(--warning-app)]/80">
+  1290→  1290→                  Ponto de equilíbrio
+  1291→  1291→                </div>
+  1292→  1292→                <div className="text-xl font-mono tabular-nums text-[var(--warning-app)] mt-1">
+  1293→  1293→                  {brl(calc.pontoEquilibrio)}
+  1294→  1294→                </div>
+  1295→  1295→                <div className="text-[11px] text-[var(--text-app-muted)] mt-1">
+  1296→  1296→                  preço mínimo para não dar prejuízo
+  1297→  1297→                </div>
+  1298→  1298→              </div>
+  1299→  1299→            </div>
+  1300→  1300→
+  1301→  1301→            {/* Badges de comparação */}
+  1302→  1302→            {proc.precoFinal != null && proc.precoFinal > 0 && (
+  1303→  1303→              <div className="flex flex-wrap items-center gap-2">
+  1304→  1304→                {proc.precoFinal < calc.pontoEquilibrio && (
+  1305→  1305→                  <Badge
+  1306→  1306→                    variant="outline"
+  1307→  1307→                    className="border-[var(--danger-app)] bg-[var(--danger-app-bg)] text-[var(--danger-app)] gap-1"
+  1308→  1308→                  >
+  1309→  1309→                    <AlertTriangle size={12} /> Abaixo do ponto de equilíbrio
+  1310→  1310→                  </Badge>
+  1311→  1311→                )}
+  1312→  1312→                {proc.precoFinal > calc.precoSugerido && (
+  1313→  1313→                  <Badge
+  1314→  1314→                    variant="outline"
+  1315→  1315→                    className="border-[var(--accent-app-soft-border)] bg-[var(--accent-app-soft-bg)] text-[var(--accent-app-text)] gap-1"
+  1316→  1316→                  >
+  1317→  1317→                    <TrendingUp size={12} /> Acima do sugerido
+  1318→  1318→                  </Badge>
+  1319→  1319→                )}
+  1320→  1320→                {proc.precoFinal >= calc.pontoEquilibrio &&
+  1321→  1321→                  proc.precoFinal <= calc.precoSugerido && (
+  1322→  1322→                    <Badge
+  1323→  1323→                      variant="outline"
+  1324→  1324→                      className="border-[var(--border-app-strong)] bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)] gap-1"
+  1325→  1325→                    >
+  1326→  1326→                      <Check size={12} /> Dentro da faixa recomendada
+  1327→  1327→                    </Badge>
+  1328→  1328→                  )}
+  1329→  1329→              </div>
+  1330→  1330→            )}
+  1331→  1331→          </div>
+  1332→  1332→        ) : null}
+  1333→  1333→      </Card>
+  1334→  1334→
+  1335→  1335→      {/* Preço final + lucratividade final */}
+  1336→  1336→      <Card className="bg-[var(--surface-app)] border-[var(--border-app)] py-0 shadow-none">
+  1337→  1337→        <div className="px-5 py-4 space-y-3">
+  1338→  1338→          <Label className="text-[11px] text-[var(--text-app-muted)] block">
+  1339→  1339→            Preço final praticado
+  1340→  1340→          </Label>
+  1341→  1341→          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+  1342→  1342→            <div className="flex-1 max-w-[200px]">
+  1343→  1343→              <Input
+  1344→  1344→                ref={precoInputRef}
+  1345→  1345→                type="number"
+  1346→  1346→                inputMode="decimal"
+  1347→  1347→                step="0.01"
+  1348→  1348→                min="0"
+  1349→  1349→                defaultValue={proc.precoFinal ?? ""}
+  1350→  1350→                placeholder="0,00"
+  1351→  1351→                disabled={!podeEditar || precoMut.isPending}
+  1352→  1352→                className={`${inputCls} font-mono tabular-nums text-right text-lg h-10`}
+  1353→  1353→                onKeyDown={(e) => {
+  1354→  1354→                  if (e.key === "Enter") {
+  1355→  1355→                    const v = num(precoInputRef.current?.value ?? "");
+  1356→  1356→                    if (!(v >= 0)) {
+  1357→  1357→                      toast.error("Informe um preço válido");
+  1358→  1358→                      return;
+  1359→  1359→                    }
+  1360→  1360→                    precoMut.mutate(v);
+  1361→  1361→                  }
+  1362→  1362→                }}
+  1363→  1363→              />
+  1364→  1364→            </div>
+  1365→  1365→            <Button
+  1366→  1366→              type="button"
+  1367→  1367→              onClick={() => {
+  1368→  1368→                const v = num(precoInputRef.current?.value ?? "");
+  1369→  1369→                if (!(v >= 0)) {
+  1370→  1370→                  toast.error("Informe um preço válido");
+  1371→  1371→                  return;
+  1372→  1372→                }
+  1373→  1373→                precoMut.mutate(v);
+  1374→  1374→              }}
+  1375→  1375→              disabled={!podeEditar || precoMut.isPending}
+  1376→  1376→              className="bg-[var(--accent-app)] text-white hover:bg-[var(--accent-app-hover)]"
+  1377→  1377→            >
+  1378→  1378→              {precoMut.isPending ? (
+  1379→  1379→                <>
+  1380→  1380→                  <Save size={14} className="animate-pulse" /> Definindo…
+  1381→  1381→                </>
+  1382→  1382→              ) : (
+  1383→  1383→                <>
+  1384→  1384→                  <Save size={14} /> Definir preço
+  1385→  1385→                </>
+  1386→  1386→              )}
+  1387→  1387→            </Button>
+  1388→  1388→            <div className="flex-1 min-w-0">
+  1389→  1389→              <div className="text-[11px] uppercase tracking-wide text-[var(--text-app-muted)] mb-1">
+  1390→  1390→                Lucratividade final
+  1391→  1391→              </div>
+  1392→  1392→              <div
+  1393→  1393→                className={`text-2xl font-mono tabular-nums ${
+  1394→  1394→                  calc && isFinite(calc.lucratividadeFinal)
+  1395→  1395→                    ? calc.lucratividadeFinal >= 0
+  1396→  1396→                      ? "text-[var(--accent-app-text)]"
+  1397→  1397→                      : "text-[var(--danger-app)]"
+  1398→  1398→                    : "text-[var(--text-app-faint)]"
+  1399→  1399→                }`}
+  1400→  1400→              >
+  1401→  1401→                {calc && isFinite(calc.lucratividadeFinal)
+  1402→  1402→                  ? pct(calc.lucratividadeFinal)
+  1403→  1403→                  : "—"}
+  1404→  1404→              </div>
+  1405→  1405→            </div>
+  1406→  1406→          </div>
+  1407→  1407→          {proc.precoFinal == null || proc.precoFinal <= 0 ? (
+  1408→  1408→            <p className="text-[11px] text-[var(--text-app-muted)]">
+  1409→  1409→              Defina um preço final para calcular a lucratividade real —
+  1410→  1410→              considera os mesmos custos e percentuais, descontando o lucro
+  1411→  1411→              desejado.
+  1412→  1412→            </p>
+  1413→  1413→          ) : null}
+  1414→  1414→        </div>
+  1415→  1415→      </Card>
+  1416→  1416→    </motion.div>
+  1417→  1417→  );
+  1418→  1418→}
+  1419→  1419→
+  1420→  1420→// ---------------------------------------------------------------------------
+  1421→  1421→// Parameter field (uncontrolled input + onBlur commit + salvando highlight)
+  1422→  1422→// ---------------------------------------------------------------------------
+  1423→  1423→function ParamField({
+  1424→  1424→  label,
+  1425→  1425→  type,
+  1426→  1426→  step,
+  1427→  1427→  min,
+  1428→  1428→  max,
+  1429→  1429→  defaultValue,
+  1430→  1430→  onBlur,
+  1431→  1431→  disabled,
+  1432→  1432→  salvando,
+  1433→  1433→}: {
+  1434→  1434→  label: string;
+  1435→  1435→  type: string;
+  1436→  1436→  step?: string;
+  1437→  1437→  min?: string;
+  1438→  1438→  max?: string;
+  1439→  1439→  defaultValue: number | string;
+  1440→  1440→  onBlur: (e: React.FocusEvent<HTMLInputElement>) => void;
+  1441→  1441→  disabled: boolean;
+  1442→  1442→  salvando: boolean;
+  1443→  1443→}) {
+  1444→  1444→  return (
+  1445→  1445→    <div>
+  1446→  1446→      <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+  1447→  1447→        {label}
+  1448→  1448→      </Label>
+  1449→  1449→      <Input
+  1450→  1450→        type={type}
+  1451→  1451→        inputMode={type === "number" ? "decimal" : undefined}
+  1452→  1452→        step={step}
+  1453→  1453→        min={min}
+  1454→  1454→        max={max}
+  1455→  1455→        defaultValue={defaultValue}
+  1456→  1456→        onBlur={onBlur}
+  1457→  1457→        disabled={disabled}
+  1458→  1458→        className={`${inputCls} font-mono tabular-nums text-right ${
+  1459→  1459→          disabled ? "opacity-70" : ""
+  1460→  1460→        } ${salvando ? "ring-2 ring-[var(--accent-app)]/30" : ""}`}
+  1461→  1461→      />
+  1462→  1462→    </div>
+  1463→  1463→  );
+  1464→  1464→}
+  1465→  1465→
+  1466→  1466→// ---------------------------------------------------------------------------
+  1467→  1467→// Insumo row (uncontrolled native select + uncontrolled input + actions)
+  1468→  1468→// ---------------------------------------------------------------------------
+  1469→  1469→function InsumoRow({
+  1470→  1470→  item,
+  1471→  1471→  insumos,
+  1472→  1472→  usedInsumoIds,
+  1473→  1473→  podeEditar,
+  1474→  1474→  custoUnitario,
+  1475→  1475→  onTrocarInsumo,
+  1476→  1476→  onSalvarQuantidade,
+  1477→  1477→  onRemover,
+  1478→  1478→  salvando,
+  1479→  1479→}: {
+  1480→  1480→  item: ItemProcedimento;
+  1481→  1481→  insumos: Insumo[];
+  1482→  1482→  usedInsumoIds: Set<string>;
+  1483→  1483→  podeEditar: boolean;
+  1484→  1484→  custoUnitario: number;
+  1485→  1485→  onTrocarInsumo: (novoInsumoId: string, quantidade: number) => void;
+  1486→  1486→  onSalvarQuantidade: (quantidade: number) => void;
+  1487→  1487→  onRemover: () => void;
+  1488→  1488→  salvando: boolean;
+  1489→  1489→}) {
+  1490→  1490→  const availableInsumos = insumos.filter(
+  1491→  1491→    (i) => i.id === item.insumoId || !usedInsumoIds.has(i.id)
+  1492→  1492→  );
+  1493→  1493→
+  1494→  1494→  return (
+  1495→  1495→    <div
+  1496→  1496→      className={`grid grid-cols-[1fr_80px_110px_40px] gap-2 px-5 py-2 border-b border-[var(--border-app-subtle)] last:border-0 items-center text-sm ${
+  1497→  1497→        salvando ? "bg-[var(--accent-app-soft-bg)]/40" : ""
+  1498→  1498→      }`}
+  1499→  1499→    >
+  1500→  1500→      <select
+  1501→  1501→        defaultValue={item.insumoId}
+  1502→  1502→        onChange={(e) =>
+  1503→  1503→          onTrocarInsumo(e.target.value, num(item.quantidade))
+  1504→  1504→        }
+  1505→  1505→        disabled={!podeEditar || salvando}
+  1506→  1506→        className={`w-full h-8 px-2 rounded-md border ${inputCls} text-sm bg-[var(--surface-app)] ${
+  1507→  1507→          podeEditar ? "" : "opacity-70"
+  1508→  1508→        }`}
+  1509→  1509→      >
+  1510→  1510→        {availableInsumos.length === 0 && (
+  1511→  1511→          <option value={item.insumoId}>{item.insumoNome ?? item.insumoId}</option>
+  1512→  1512→        )}
+  1513→  1513→        {availableInsumos.map((i) => (
+  1514→  1514→          <option key={i.id} value={i.id}>
+  1515→  1515→            {i.nome}
+  1516→  1516→          </option>
+  1517→  1517→        ))}
+  1518→  1518→      </select>
+  1519→  1519→      <Input
+  1520→  1520→        type="number"
+  1521→  1521→        inputMode="decimal"
+  1522→  1522→        step="0.01"
+  1523→  1523→        min="0"
+  1524→  1524→        defaultValue={num(item.quantidade)}
+  1525→  1525→        onBlur={(e) => {
+  1526→  1526→          const v = num(e.currentTarget.value);
+  1527→  1527→          if (v === num(item.quantidade)) return;
+  1528→  1528→          if (!(v >= 0)) {
+  1529→  1529→            toast.error("Quantidade inválida");
+  1530→  1530→            return;
+  1531→  1531→          }
+  1532→  1532→          onSalvarQuantidade(v);
+  1533→  1533→        }}
+  1534→  1534→        disabled={!podeEditar || salvando}
+  1535→  1535→        className={`${inputCls} font-mono tabular-nums text-right h-8`}
+  1536→  1536→      />
+  1537→  1537→      <div className="text-right font-mono tabular-nums text-[var(--text-app-muted)] text-sm">
+  1538→  1538→        {brl(num(item.quantidade) * custoUnitario)}
+  1539→  1539→      </div>
+  1540→  1540→      <div className="text-center">
+  1541→  1541→        <Button
+  1542→  1542→          type="button"
+  1543→  1543→          variant="ghost"
+  1544→  1544→          size="icon"
+  1545→  1545→          onClick={onRemover}
+  1546→  1546→          disabled={!podeEditar || salvando}
+  1547→  1547→          title="Remover insumo"
+  1548→  1548→          className="h-8 w-8 text-[var(--text-app-muted)] hover:text-[var(--danger-app)] hover:bg-[var(--danger-app-bg)]"
+  1549→  1549→        >
+  1550→  1550→          <Trash2 size={13} />
+  1551→  1551→        </Button>
+  1552→  1552→      </div>
+  1553→  1553→    </div>
+  1554→  1554→  );
+  1555→  1555→}
+  1556→  1556→

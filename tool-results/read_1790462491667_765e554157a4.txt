@@ -1,0 +1,602 @@
+   100→  const id = uuid();
+   101→  const emailNormalizado = email.toLowerCase();
+   102→  try {
+   103→    const senhaHash = await hashSenha(senha);
+   104→    await db.query(
+   105→      "insert into usuario (id, clinica_id, nome, email, senha_hash, papel) values ($1, $2, $3, $4, $5, $6)",
+   106→      [id, payload.clinicaId, nome, emailNormalizado, senhaHash, papel]
+   107→    );
+   108→    res.status(201).json({ id, nome, email: emailNormalizado, papel });
+   109→  } catch (err) {
+   110→    if (ehErroDeEmailDuplicado(err)) return res.status(409).json({ erro: "Já existe uma conta com esse e-mail." });
+   111→    throw err;
+   112→  }
+   113→}));
+   114→
+   115→// ---------------------------------------------------------------------------
+   116→// Autenticação obrigatória a partir daqui
+   117→// ---------------------------------------------------------------------------
+   118→router.use((req, res, next) => {
+   119→  const auth = req.header("authorization") || "";
+   120→  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+   121→  if (!token) return res.status(401).json({ erro: "Faça login: token ausente no header Authorization." });
+   122→  try {
+   123→    const payload = verificarToken(token);
+   124→    req.usuarioId = payload.usuarioId;
+   125→    req.clinicaId = payload.clinicaId;
+   126→    req.papel = payload.papel;
+   127→    next();
+   128→  } catch {
+   129→    return res.status(401).json({ erro: "Sessão expirada ou token inválido. Faça login de novo." });
+   130→  }
+   131→});
+   132→
+   133→const somentePapel = (...papeis) => (req, res, next) => {
+   134→  if (!papeis.includes(req.papel)) {
+   135→    return res.status(403).json({ erro: `Esta ação exige um dos papéis: ${papeis.join(", ")}.` });
+   136→  }
+   137→  next();
+   138→};
+   139→const podeEditar = somentePapel("dono", "financeiro");
+   140→
+   141→// ---- Despesas fixas ----
+   142→router.get("/despesas", asyncHandler(async (req, res) => {
+   143→  const { rows } = await db.query("select * from despesa_fixa where clinica_id = $1 order by ordem", [req.clinicaId]);
+   144→  res.json(rows);
+   145→}));
+   146→
+   147→router.post("/despesas", podeEditar, asyncHandler(async (req, res) => {
+   148→  const { nome, valor } = req.body;
+   149→  const id = uuid();
+   150→  await db.query("insert into despesa_fixa (id, clinica_id, nome, valor) values ($1, $2, $3, $4)", [id, req.clinicaId, nome, valor]);
+   151→  res.status(201).json({ id, clinica_id: req.clinicaId, nome, valor, ordem: 0 });
+   152→}));
+   153→
+   154→router.put("/despesas/:id", podeEditar, asyncHandler(async (req, res) => {
+   155→  const { nome, valor } = req.body;
+   156→  const { rows: atuais } = await db.query("select * from despesa_fixa where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   157→  if (!atuais[0]) return res.status(404).end();
+   158→  await db.query(
+   159→    "update despesa_fixa set nome = coalesce($1, nome), valor = coalesce($2, valor) where id = $3 and clinica_id = $4",
+   160→    [nome ?? null, valor ?? null, req.params.id, req.clinicaId]
+   161→  );
+   162→  const { rows } = await db.query("select * from despesa_fixa where id = $1", [req.params.id]);
+   163→  res.json(rows[0]);
+   164→}));
+   165→
+   166→router.delete("/despesas/:id", podeEditar, asyncHandler(async (req, res) => {
+   167→  await db.query("delete from despesa_fixa where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   168→  res.status(204).end();
+   169→}));
+   170→
+   171→// ---- Capacidade produtiva ----
+   172→router.get("/capacidade", asyncHandler(async (req, res) => {
+   173→  const { rows } = await db.query("select * from capacidade_produtiva where clinica_id = $1", [req.clinicaId]);
+   174→  res.json(rows[0] || null);
+   175→}));
+   176→
+   177→router.put("/capacidade", podeEditar, asyncHandler(async (req, res) => {
+   178→  const { diasTrabalhados, horasPorDia, unidadesRenda, percentOcupacao } = req.body;
+   179→  await db.query(
+   180→    `insert into capacidade_produtiva (clinica_id, dias_trabalhados, horas_por_dia, unidades_renda, percent_ocupacao)
+   181→     values ($1, $2, $3, $4, $5)
+   182→     on conflict (clinica_id) do update set
+   183→       dias_trabalhados = excluded.dias_trabalhados,
+   184→       horas_por_dia = excluded.horas_por_dia,
+   185→       unidades_renda = excluded.unidades_renda,
+   186→       percent_ocupacao = excluded.percent_ocupacao`,
+   187→    [req.clinicaId, diasTrabalhados, horasPorDia, unidadesRenda, percentOcupacao]
+   188→  );
+   189→  const { rows } = await db.query("select * from capacidade_produtiva where clinica_id = $1", [req.clinicaId]);
+   190→  res.json(rows[0]);
+   191→}));
+   192→
+   193→// ---- Insumos ----
+   194→router.get("/insumos", asyncHandler(async (req, res) => {
+   195→  const { rows } = await db.query("select * from insumo where clinica_id = $1 order by nome", [req.clinicaId]);
+   196→  res.json(rows);
+   197→}));
+   198→
+   199→router.post("/insumos", podeEditar, asyncHandler(async (req, res) => {
+   200→  const { nome, unidade, valorTotal, quantidade } = req.body;
+   201→  const id = uuid();
+   202→  await db.query(
+   203→    "insert into insumo (id, clinica_id, nome, unidade, valor_total, quantidade) values ($1, $2, $3, $4, $5, $6)",
+   204→    [id, req.clinicaId, nome, unidade, valorTotal, quantidade]
+   205→  );
+   206→  res.status(201).json({ id, clinica_id: req.clinicaId, nome, unidade, valor_total: valorTotal, quantidade });
+   207→}));
+   208→
+   209→router.put("/insumos/:id", podeEditar, asyncHandler(async (req, res) => {
+   210→  const { nome, unidade, valorTotal, quantidade } = req.body;
+   211→  await db.query(
+   212→    `update insumo set
+   213→       nome = coalesce($1, nome), unidade = coalesce($2, unidade),
+   214→       valor_total = coalesce($3, valor_total), quantidade = coalesce($4, quantidade)
+   215→     where id = $5 and clinica_id = $6`,
+   216→    [nome ?? null, unidade ?? null, valorTotal ?? null, quantidade ?? null, req.params.id, req.clinicaId]
+   217→  );
+   218→  const { rows } = await db.query("select * from insumo where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   219→  if (!rows[0]) return res.status(404).end();
+   220→  res.json(rows[0]);
+   221→}));
+   222→
+   223→router.delete("/insumos/:id", podeEditar, asyncHandler(async (req, res) => {
+   224→  await db.query("delete from insumo where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   225→  res.status(204).end();
+   226→}));
+   227→
+   228→// ---- Ativos (imobilizado) e sua depreciação ----
+   229→router.get("/ativos", asyncHandler(async (req, res) => {
+   230→  const { rows } = await db.query("select * from ativo where clinica_id = $1 order by nome", [req.clinicaId]);
+   231→  res.json(rows);
+   232→}));
+   233→
+   234→router.post("/ativos", podeEditar, asyncHandler(async (req, res) => {
+   235→  const { nome, dataAquisicao, valorAquisicao, vidaUtilAnos } = req.body;
+   236→  const id = uuid();
+   237→  await db.query(
+   238→    "insert into ativo (id, clinica_id, nome, data_aquisicao, valor_aquisicao, vida_util_anos) values ($1, $2, $3, $4, $5, $6)",
+   239→    [id, req.clinicaId, nome, dataAquisicao || null, valorAquisicao || 0, vidaUtilAnos || 1]
+   240→  );
+   241→  const { rows } = await db.query("select * from ativo where id = $1", [id]);
+   242→  res.status(201).json(rows[0]);
+   243→}));
+   244→
+   245→router.put("/ativos/:id", podeEditar, asyncHandler(async (req, res) => {
+   246→  const { nome, dataAquisicao, valorAquisicao, vidaUtilAnos } = req.body;
+   247→  await db.query(
+   248→    `update ativo set
+   249→       nome = coalesce($1, nome), data_aquisicao = coalesce($2, data_aquisicao),
+   250→       valor_aquisicao = coalesce($3, valor_aquisicao), vida_util_anos = coalesce($4, vida_util_anos)
+   251→     where id = $5 and clinica_id = $6`,
+   252→    [nome ?? null, dataAquisicao ?? null, valorAquisicao ?? null, vidaUtilAnos ?? null, req.params.id, req.clinicaId]
+   253→  );
+   254→  const { rows } = await db.query("select * from ativo where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   255→  if (!rows[0]) return res.status(404).end();
+   256→  res.json(rows[0]);
+   257→}));
+   258→
+   259→router.delete("/ativos/:id", podeEditar, asyncHandler(async (req, res) => {
+   260→  await db.query("delete from ativo where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   261→  res.status(204).end();
+   262→}));
+   263→
+   264→// ---- Custo fixo por minuto (agregado) ----
+   265→async function carregarCustoMinuto(clinicaId) {
+   266→  const [despesasRes, ativosRes, capacidadeRes] = await Promise.all([
+   267→    db.query("select valor from despesa_fixa where clinica_id = $1", [clinicaId]),
+   268→    db.query("select valor_aquisicao, vida_util_anos from ativo where clinica_id = $1", [clinicaId]),
+   269→    db.query("select * from capacidade_produtiva where clinica_id = $1", [clinicaId]),
+   270→  ]);
+   271→  const despesas = despesasRes.rows.map((d) => ({ valor: Number(d.valor) }));
+   272→  // Depreciação mensal de cada ativo = valor de aquisição / vida útil (anos) / 12.
+   273→  // Entra na soma do custo fixo do mesmo jeito que uma despesa comum — é
+   274→  // dinheiro que a clínica "gasta" todo mês, só que na forma de desgaste do
+   275→  // equipamento em vez de uma conta a pagar.
+   276→  const depreciacoes = ativosRes.rows.map((a) => ({
+   277→    valor: Number(a.vida_util_anos) > 0 ? Number(a.valor_aquisicao) / Number(a.vida_util_anos) / 12 : 0,
+   278→  }));
+   279→  const depreciacaoMensalTotal = custoFixoTotal(depreciacoes);
+   280→  const capacidadeRow = capacidadeRes.rows[0];
+   281→  if (!capacidadeRow) return null;
+   282→  const capacidade = {
+   283→    diasTrabalhados: Number(capacidadeRow.dias_trabalhados),
+   284→    horasPorDia: Number(capacidadeRow.horas_por_dia),
+   285→    unidadesRenda: Number(capacidadeRow.unidades_renda),
+   286→    percentOcupacao: Number(capacidadeRow.percent_ocupacao),
+   287→  };
+   288→  const todosOsCustos = [...despesas, ...depreciacoes];
+   289→  return {
+   290→    custoFixoTotal: custoFixoTotal(todosOsCustos),
+   291→    depreciacaoMensalTotal,
+   292→    horasEfetivas: horasEfetivas(capacidade),
+   293→    custoFixoPorHora: custoFixoPorHora(todosOsCustos, capacidade),
+   294→    custoFixoPorMinuto: custoFixoPorMinuto(todosOsCustos, capacidade),
+   295→  };
+   296→}
+   297→
+   298→router.get("/resumo", asyncHandler(async (req, res) => {
+   299→  const resumo = await carregarCustoMinuto(req.clinicaId);
+   300→  if (!resumo) return res.status(400).json({ erro: "Capacidade produtiva não configurada para esta clínica." });
+   301→  res.json(resumo);
+   302→}));
+   303→
+   304→// ---- Procedimentos ----
+   305→router.get("/procedimentos", asyncHandler(async (req, res) => {
+   306→  const { rows } = await db.query("select * from procedimento where clinica_id = $1 and ativo order by nome", [req.clinicaId]);
+   307→  res.json(rows);
+   308→}));
+   309→
+   310→router.post("/procedimentos", podeEditar, asyncHandler(async (req, res) => {
+   311→  const { nome, tempoMinutos, laudos, retrabalhoPct } = req.body;
+   312→  const id = uuid();
+   313→  await db.query(
+   314→    `insert into procedimento (id, clinica_id, nome, tempo_minutos, laudos, retrabalho_pct)
+   315→     values ($1, $2, $3, $4, $5, $6)`,
+   316→    [id, req.clinicaId, nome, tempoMinutos || 0, laudos || 0, retrabalhoPct ?? 0.03]
+   317→  );
+   318→  const { rows } = await db.query("select * from procedimento where id = $1", [id]);
+   319→  res.status(201).json(rows[0]);
+   320→}));
+   321→
+   322→const CAMPOS_PROCEDIMENTO = {
+   323→  nome: "nome",
+   324→  tempoMinutos: "tempo_minutos",
+   325→  laudos: "laudos",
+   326→  retrabalhoPct: "retrabalho_pct",
+   327→  comissaoPct: "comissao_pct",
+   328→  lucroDesejadoPct: "lucro_desejado_pct",
+   329→  inadimplenciaPct: "inadimplencia_pct",
+   330→  impostosPct: "impostos_pct",
+   331→  taxaCartaoPct: "taxa_cartao_pct",
+   332→  outrosPct: "outros_pct",
+   333→  precoConcorrencia: "preco_concorrencia",
+   334→  equipamentoId: "equipamento_id",
+   335→};
+   336→
+   337→router.put("/procedimentos/:id", podeEditar, asyncHandler(async (req, res) => {
+   338→  const sets = [];
+   339→  const values = [];
+   340→  for (const [key, coluna] of Object.entries(CAMPOS_PROCEDIMENTO)) {
+   341→    if (req.body[key] !== undefined) {
+   342→      values.push(req.body[key]);
+   343→      sets.push(`${coluna} = $${values.length}`);
+   344→    }
+   345→  }
+   346→  if (sets.length === 0) return res.status(400).json({ erro: "Nenhum campo reconhecido para atualizar." });
+   347→  values.push(req.params.id, req.clinicaId);
+   348→  await db.query(
+   349→    `update procedimento set ${sets.join(", ")} where id = $${values.length - 1} and clinica_id = $${values.length}`,
+   350→    values
+   351→  );
+   352→  const { rows } = await db.query("select * from procedimento where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   353→  if (!rows[0]) return res.status(404).end();
+   354→  res.json(rows[0]);
+   355→}));
+   356→
+   357→router.delete("/procedimentos/:id", podeEditar, asyncHandler(async (req, res) => {
+   358→  await db.query("update procedimento set ativo = 0 where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   359→  res.status(204).end();
+   360→}));
+   361→
+   362→router.get("/procedimentos/:id/itens", asyncHandler(async (req, res) => {
+   363→  const { rows } = await db.query(
+   364→    `select pi.insumo_id, pi.quantidade, i.nome as insumo_nome
+   365→     from procedimento_insumo pi join insumo i on i.id = pi.insumo_id
+   366→     where pi.procedimento_id = $1`,
+   367→    [req.params.id]
+   368→  );
+   369→  res.json(rows);
+   370→}));
+   371→
+   372→router.post("/procedimentos/:id/itens", podeEditar, asyncHandler(async (req, res) => {
+   373→  const { insumoId, quantidade } = req.body;
+   374→  await db.query(
+   375→    `insert into procedimento_insumo (procedimento_id, insumo_id, quantidade)
+   376→     values ($1, $2, $3)
+   377→     on conflict (procedimento_id, insumo_id) do update set quantidade = excluded.quantidade`,
+   378→    [req.params.id, insumoId, quantidade ?? 1]
+   379→  );
+   380→  res.status(201).json({ procedimento_id: req.params.id, insumo_id: insumoId, quantidade: quantidade ?? 1 });
+   381→}));
+   382→
+   383→router.delete("/procedimentos/:id/itens/:insumoId", podeEditar, asyncHandler(async (req, res) => {
+   384→  await db.query("delete from procedimento_insumo where procedimento_id = $1 and insumo_id = $2", [req.params.id, req.params.insumoId]);
+   385→  res.status(204).end();
+   386→}));
+   387→
+   388→router.get("/procedimentos/:id/calculo", asyncHandler(async (req, res) => {
+   389→  const resumo = await carregarCustoMinuto(req.clinicaId);
+   390→  if (!resumo) return res.status(400).json({ erro: "Capacidade produtiva não configurada para esta clínica." });
+   391→
+   392→  const { rows: procRows } = await db.query("select * from procedimento where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   393→  const p = procRows[0];
+   394→  if (!p) return res.status(404).end();
+   395→
+   396→  const { rows: itensRows } = await db.query(
+   397→    `select pi.quantidade, i.id as insumo_id, i.valor_total, i.quantidade as insumo_quantidade
+   398→     from procedimento_insumo pi join insumo i on i.id = pi.insumo_id
+   399→     where pi.procedimento_id = $1`,
+   400→    [p.id]
+   401→  );
+   402→  const custoUnitario = Object.fromEntries(
+   403→    itensRows.map((r) => [r.insumo_id, r.insumo_quantidade ? r.valor_total / r.insumo_quantidade : 0])
+   404→  );
+   405→
+   406→  const proc = {
+   407→    tempoMinutos: Number(p.tempo_minutos),
+   408→    laudos: Number(p.laudos),
+   409→    retrabalho: Number(p.retrabalho_pct),
+   410→    itens: itensRows.map((r) => ({ insumoId: r.insumo_id, quantidade: Number(r.quantidade) })),
+   411→    comissao: Number(p.comissao_pct),
+   412→    lucroDesejado: Number(p.lucro_desejado_pct),
+   413→    inadimplencia: Number(p.inadimplencia_pct),
+   414→    impostos: Number(p.impostos_pct),
+   415→    taxaCartao: Number(p.taxa_cartao_pct),
+   416→    outrosPct: Number(p.outros_pct),
+   417→    precoFinal: p.preco_final ? Number(p.preco_final) : 0,
+   418→  };
+   419→
+   420→  const resultado = calcProcedimento(proc, resumo.custoFixoPorMinuto, (id) => custoUnitario[id] || 0);
+   421→  res.json({ procedimento: p.nome, ...resultado });
+   422→}));
+   423→
+   424→router.put("/procedimentos/:id/preco-final", podeEditar, asyncHandler(async (req, res) => {
+   425→  const { precoNovo } = req.body;
+   426→  const { rows: atuais } = await db.query("select preco_final from procedimento where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   427→  if (!atuais[0]) return res.status(404).end();
+   428→
+   429→  await db.query("update procedimento set preco_final = $1 where id = $2", [precoNovo, req.params.id]);
+   430→  await db.query(
+   431→    "insert into historico_preco (id, procedimento_id, usuario_id, preco_anterior, preco_novo) values ($1, $2, $3, $4, $5)",
+   432→    [uuid(), req.params.id, req.usuarioId, atuais[0].preco_final, precoNovo]
+   433→  );
+   434→  res.status(204).end();
+   435→}));
+   436→
+   437→// ---------------------------------------------------------------------------
+   438→// Agenda de pacientes — aberta a qualquer papel autenticado (agendar não é
+   439→// uma ação financeira, então não passa por podeEditar como despesas/preços).
+   440→// ---------------------------------------------------------------------------
+   441→router.get("/agendamentos", asyncHandler(async (req, res) => {
+   442→  const data = req.query.data;
+   443→  if (!data) return res.status(400).json({ erro: "Informe ?data=AAAA-MM-DD." });
+   444→  const { rows } = await db.query(
+   445→    `select a.*, r.data as remarcado_para_data, r.hora as remarcado_para_hora
+   446→     from agendamento a
+   447→     left join agendamento r on r.id = a.remarcado_para_id
+   448→     where a.clinica_id = $1 and a.data = $2
+   449→     order by a.hora is null, a.hora`,
+   450→    [req.clinicaId, data]
+   451→  );
+   452→  res.json(rows);
+   453→}));
+   454→
+   455→router.post("/agendamentos", asyncHandler(async (req, res) => {
+   456→  const { nome, telefone, exame, plano, particular, data, hora } = req.body;
+   457→  if (!nome || !data) return res.status(400).json({ erro: "nome e data são obrigatórios." });
+   458→  const id = uuid();
+   459→  await db.query(
+   460→    `insert into agendamento (id, clinica_id, nome, telefone, exame, plano, particular, data, hora)
+   461→     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+   462→    [id, req.clinicaId, nome, telefone || null, exame || null, plano ? 1 : 0, particular ? 1 : 0, data, hora || null]
+   463→  );
+   464→  const { rows } = await db.query("select * from agendamento where id = $1", [id]);
+   465→  res.status(201).json(rows[0]);
+   466→}));
+   467→
+   468→const CAMPOS_AGENDAMENTO = {
+   469→  nome: "nome",
+   470→  telefone: "telefone",
+   471→  exame: "exame",
+   472→  plano: "plano",
+   473→  particular: "particular",
+   474→  data: "data",
+   475→  hora: "hora",
+   476→  status: "status",
+   477→};
+   478→
+   479→router.put("/agendamentos/:id", asyncHandler(async (req, res) => {
+   480→  const sets = [];
+   481→  const values = [];
+   482→  for (const [key, coluna] of Object.entries(CAMPOS_AGENDAMENTO)) {
+   483→    if (req.body[key] !== undefined) {
+   484→      const valor = (key === "plano" || key === "particular") ? (req.body[key] ? 1 : 0) : req.body[key];
+   485→      values.push(valor);
+   486→      sets.push(`${coluna} = $${values.length}`);
+   487→    }
+   488→  }
+   489→  if (sets.length === 0) return res.status(400).json({ erro: "Nenhum campo reconhecido para atualizar." });
+   490→  values.push(req.params.id, req.clinicaId);
+   491→  await db.query(
+   492→    `update agendamento set ${sets.join(", ")} where id = $${values.length - 1} and clinica_id = $${values.length}`,
+   493→    values
+   494→  );
+   495→  const { rows } = await db.query("select * from agendamento where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   496→  if (!rows[0]) return res.status(404).end();
+   497→  res.json(rows[0]);
+   498→}));
+   499→
+   500→// Remarcar cria um novo agendamento na nova data e liga o original a ele —
+   501→// é assim que o "link para o dia remarcado" funciona.
+   502→router.put("/agendamentos/:id/remarcar", asyncHandler(async (req, res) => {
+   503→  const { novaData, novaHora } = req.body;
+   504→  if (!novaData) return res.status(400).json({ erro: "novaData é obrigatória." });
+   505→
+   506→  const { rows: atuais } = await db.query("select * from agendamento where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   507→  const original = atuais[0];
+   508→  if (!original) return res.status(404).end();
+   509→
+   510→  const novoId = uuid();
+   511→  await db.query(
+   512→    `insert into agendamento (id, clinica_id, nome, telefone, exame, plano, particular, data, hora, status)
+   513→     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'aguardando')`,
+   514→    [novoId, req.clinicaId, original.nome, original.telefone, original.exame, original.plano, original.particular, novaData, novaHora || null]
+   515→  );
+   516→  await db.query(
+   517→    "update agendamento set status = 'remarcado', remarcado_para_id = $1 where id = $2",
+   518→    [novoId, req.params.id]
+   519→  );
+   520→
+   521→  const { rows } = await db.query("select * from agendamento where id = $1", [novoId]);
+   522→  res.status(201).json(rows[0]);
+   523→}));
+   524→
+   525→router.delete("/agendamentos/:id", asyncHandler(async (req, res) => {
+   526→  await db.query("delete from agendamento where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   527→  res.status(204).end();
+   528→}));
+   529→
+   530→// ---------------------------------------------------------------------------
+   531→// Financeiro avançado — convênios, contas a receber/pagar, glosas, DRE.
+   532→// Segue o mapa mestre (módulos 07 e 08).
+   533→// ---------------------------------------------------------------------------
+   534→
+   535→// ---- Convênios ----
+   536→router.get("/convenios", asyncHandler(async (req, res) => {
+   537→  const { rows } = await db.query("select * from convenio where clinica_id = $1 order by nome", [req.clinicaId]);
+   538→  res.json(rows);
+   539→}));
+   540→
+   541→router.post("/convenios", podeEditar, asyncHandler(async (req, res) => {
+   542→  const { nome, cnpj, telefone, email, responsavel, prazoMedioDias } = req.body;
+   543→  const id = uuid();
+   544→  await db.query(
+   545→    "insert into convenio (id, clinica_id, nome, cnpj, telefone, email, responsavel, prazo_medio_dias) values ($1,$2,$3,$4,$5,$6,$7,$8)",
+   546→    [id, req.clinicaId, nome, cnpj || null, telefone || null, email || null, responsavel || null, prazoMedioDias ?? 30]
+   547→  );
+   548→  const { rows } = await db.query("select * from convenio where id = $1", [id]);
+   549→  res.status(201).json(rows[0]);
+   550→}));
+   551→
+   552→router.put("/convenios/:id", podeEditar, asyncHandler(async (req, res) => {
+   553→  const { nome, cnpj, telefone, email, responsavel, prazoMedioDias, ativo } = req.body;
+   554→  await db.query(
+   555→    `update convenio set
+   556→       nome = coalesce($1, nome), cnpj = coalesce($2, cnpj), telefone = coalesce($3, telefone),
+   557→       email = coalesce($4, email), responsavel = coalesce($5, responsavel),
+   558→       prazo_medio_dias = coalesce($6, prazo_medio_dias), ativo = coalesce($7, ativo)
+   559→     where id = $8 and clinica_id = $9`,
+   560→    [nome ?? null, cnpj ?? null, telefone ?? null, email ?? null, responsavel ?? null, prazoMedioDias ?? null, ativo === undefined ? null : (ativo ? 1 : 0), req.params.id, req.clinicaId]
+   561→  );
+   562→  const { rows } = await db.query("select * from convenio where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   563→  if (!rows[0]) return res.status(404).end();
+   564→  res.json(rows[0]);
+   565→}));
+   566→
+   567→router.delete("/convenios/:id", podeEditar, asyncHandler(async (req, res) => {
+   568→  await db.query("delete from convenio where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   569→  res.status(204).end();
+   570→}));
+   571→
+   572→// ---- Tabela de preços por convênio (com vigência/histórico) ----
+   573→router.get("/convenios/:id/precos", asyncHandler(async (req, res) => {
+   574→  const { rows } = await db.query(
+   575→    `select ctp.*, p.nome as procedimento_nome from convenio_tabela_preco ctp
+   576→     join procedimento p on p.id = ctp.procedimento_id
+   577→     where ctp.convenio_id = $1 order by p.nome, ctp.vigencia_inicio desc`,
+   578→    [req.params.id]
+   579→  );
+   580→  res.json(rows);
+   581→}));
+   582→
+   583→// Sempre INSERE uma nova vigência — nunca sobrescreve a anterior, porque
+   584→// exames antigos precisam continuar lendo o valor que estava valendo na
+   585→// data em que foram feitos (regra do mapa: "congelar a regra comercial").
+   586→router.post("/convenios/:id/precos", podeEditar, asyncHandler(async (req, res) => {
+   587→  const { procedimentoId, valor, vigenciaInicio } = req.body;
+   588→  const id = uuid();
+   589→  await db.query(
+   590→    "insert into convenio_tabela_preco (id, convenio_id, procedimento_id, valor, vigencia_inicio) values ($1,$2,$3,$4,$5)",
+   591→    [id, req.params.id, procedimentoId, valor, vigenciaInicio || new Date().toISOString().slice(0, 10)]
+   592→  );
+   593→  const { rows } = await db.query("select * from convenio_tabela_preco where id = $1", [id]);
+   594→  res.status(201).json(rows[0]);
+   595→}));
+   596→
+   597→// Valor vigente de um procedimento para um convênio numa data — é isto que
+   598→// o lançamento de conta a receber usa pra "congelar" o preço do exame.
+   599→async function precoVigente(convenioId, procedimentoId, data) {
+   600→  const { rows } = await db.query(
+   601→    `select valor from convenio_tabela_preco
+   602→     where convenio_id = $1 and procedimento_id = $2 and vigencia_inicio <= $3
+   603→     order by vigencia_inicio desc limit 1`,
+   604→    [convenioId, procedimentoId, data]
+   605→  );
+   606→  return rows[0] ? Number(rows[0].valor) : null;
+   607→}
+   608→
+   609→// ---- Despesas recorrentes ----
+   610→router.get("/despesas-recorrentes", asyncHandler(async (req, res) => {
+   611→  const { rows } = await db.query("select * from despesa_recorrente where clinica_id = $1 order by descricao", [req.clinicaId]);
+   612→  res.json(rows);
+   613→}));
+   614→
+   615→router.post("/despesas-recorrentes", podeEditar, asyncHandler(async (req, res) => {
+   616→  const { descricao, categoria, fornecedor, valor, diaVencimento } = req.body;
+   617→  const id = uuid();
+   618→  await db.query(
+   619→    "insert into despesa_recorrente (id, clinica_id, descricao, categoria, fornecedor, valor, dia_vencimento) values ($1,$2,$3,$4,$5,$6,$7)",
+   620→    [id, req.clinicaId, descricao, categoria || null, fornecedor || null, valor, diaVencimento ?? 5]
+   621→  );
+   622→  const { rows } = await db.query("select * from despesa_recorrente where id = $1", [id]);
+   623→  res.status(201).json(rows[0]);
+   624→}));
+   625→
+   626→router.delete("/despesas-recorrentes/:id", podeEditar, asyncHandler(async (req, res) => {
+   627→  await db.query("delete from despesa_recorrente where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   628→  res.status(204).end();
+   629→}));
+   630→
+   631→// Gera os lançamentos de conta a pagar do mês pedido, pra cada despesa
+   632→// recorrente ativa — idempotente: não duplica se já rodou pra aquele mês.
+   633→router.post("/despesas-recorrentes/gerar", podeEditar, asyncHandler(async (req, res) => {
+   634→  const { mes } = req.body; // "YYYY-MM"
+   635→  if (!mes) return res.status(400).json({ erro: "mes (AAAA-MM) é obrigatório." });
+   636→  const { rows: recorrentes } = await db.query("select * from despesa_recorrente where clinica_id = $1 and ativa = 1", [req.clinicaId]);
+   637→  const criados = [];
+   638→  for (const r of recorrentes) {
+   639→    const { rows: existentes } = await db.query(
+   640→      "select id from conta_pagar where recorrente_id = $1 and vencimento like $2",
+   641→      [r.id, `${mes}%`]
+   642→    );
+   643→    if (existentes.length > 0) continue;
+   644→    const dia = String(r.dia_vencimento).padStart(2, "0");
+   645→    const vencimento = `${mes}-${dia}`;
+   646→    const id = uuid();
+   647→    await db.query(
+   648→      "insert into conta_pagar (id, clinica_id, descricao, categoria, fornecedor, valor, vencimento, recorrente_id) values ($1,$2,$3,$4,$5,$6,$7,$8)",
+   649→      [id, req.clinicaId, r.descricao, r.categoria, r.fornecedor, r.valor, vencimento, r.id]
+   650→    );
+   651→    criados.push(id);
+   652→  }
+   653→  res.status(201).json({ gerados: criados.length });
+   654→}));
+   655→
+   656→// ---- Contas a pagar ----
+   657→router.get("/contas-pagar", asyncHandler(async (req, res) => {
+   658→  const { status, mes } = req.query;
+   659→  const condicoes = ["clinica_id = $1"];
+   660→  const valores = [req.clinicaId];
+   661→  if (status) { valores.push(status); condicoes.push(`status = $${valores.length}`); }
+   662→  if (mes) { valores.push(`${mes}%`); condicoes.push(`vencimento like $${valores.length}`); }
+   663→  const { rows } = await db.query(`select * from conta_pagar where ${condicoes.join(" and ")} order by vencimento`, valores);
+   664→  res.json(rows);
+   665→}));
+   666→
+   667→router.post("/contas-pagar", podeEditar, asyncHandler(async (req, res) => {
+   668→  const { descricao, categoria, fornecedor, valor, vencimento } = req.body;
+   669→  const id = uuid();
+   670→  await db.query(
+   671→    "insert into conta_pagar (id, clinica_id, descricao, categoria, fornecedor, valor, vencimento) values ($1,$2,$3,$4,$5,$6,$7)",
+   672→    [id, req.clinicaId, descricao, categoria || null, fornecedor || null, valor, vencimento]
+   673→  );
+   674→  const { rows } = await db.query("select * from conta_pagar where id = $1", [id]);
+   675→  res.status(201).json(rows[0]);
+   676→}));
+   677→
+   678→router.put("/contas-pagar/:id", podeEditar, asyncHandler(async (req, res) => {
+   679→  const { status, dataPagamento } = req.body;
+   680→  await db.query(
+   681→    "update conta_pagar set status = coalesce($1, status), data_pagamento = coalesce($2, data_pagamento) where id = $3 and clinica_id = $4",
+   682→    [status ?? null, dataPagamento ?? null, req.params.id, req.clinicaId]
+   683→  );
+   684→  const { rows } = await db.query("select * from conta_pagar where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   685→  if (!rows[0]) return res.status(404).end();
+   686→  res.json(rows[0]);
+   687→}));
+   688→
+   689→router.delete("/contas-pagar/:id", podeEditar, asyncHandler(async (req, res) => {
+   690→  await db.query("delete from conta_pagar where id = $1 and clinica_id = $2", [req.params.id, req.clinicaId]);
+   691→  res.status(204).end();
+   692→}));
+   693→
+   694→// ---- Contas a receber ----
+   695→router.get("/contas-receber", asyncHandler(async (req, res) => {
+   696→  const { status, mes, convenioId } = req.query;
+   697→  const condicoes = ["cr.clinica_id = $1"];
+   698→  const valores = [req.clinicaId];
+   699→  if (status) { valores.push(status); condicoes.push(`cr.status = $${valores.length}`); }
+
+[showing lines 100-699 of 1058; use offset=700 with limit to continue reading]
