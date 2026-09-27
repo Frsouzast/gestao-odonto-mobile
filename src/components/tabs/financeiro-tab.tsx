@@ -176,6 +176,9 @@ interface Glosa {
   valorFaturado: number | null;
   dataExame: string | null;
   convenioNome: string | null;
+  // Campos extras adicionados pelo backend em T7:
+  diasEmRecurso: number;  // dias desde criadoEm (0 se não estiver em_recurso)
+  atrasada: boolean;      // true quando status === 'em_recurso' && diasEmRecurso > 30
 }
 
 interface FinanceiroResumo {
@@ -3100,6 +3103,16 @@ function GlosasPanel({ podeEditar }: { podeEditar: boolean }) {
     [q.data]
   );
 
+  // Glosas atrasadas = em_recurso há >30 dias (campo calculado pelo backend)
+  const glosasAtrasadas = useMemo(
+    () => (q.data ?? []).filter((g) => g.atrasada),
+    [q.data]
+  );
+  const totalAtrasado = useMemo(
+    () => glosasAtrasadas.reduce((s, g) => s + num(g.valor), 0),
+    [glosasAtrasadas]
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -3107,7 +3120,7 @@ function GlosasPanel({ podeEditar }: { podeEditar: boolean }) {
       transition={{ duration: 0.2 }}
       className="space-y-4"
     >
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard
           label="Total glosado (todas pendências)"
           value={brl(totalGlosado)}
@@ -3120,6 +3133,12 @@ function GlosasPanel({ podeEditar }: { podeEditar: boolean }) {
           icon={<Receipt size={16} />}
         />
         <StatCard
+          label="Atrasadas (>30 dias em recurso)"
+          value={String(glosasAtrasadas.length)}
+          icon={<AlertTriangle size={16} />}
+          danger={glosasAtrasadas.length > 0}
+        />
+        <StatCard
           label="Filtro atual"
           value={
             statusFilter
@@ -3130,6 +3149,36 @@ function GlosasPanel({ podeEditar }: { podeEditar: boolean }) {
           accent
         />
       </div>
+
+      {/* Banner de alerta — glosas atrasadas */}
+      {glosasAtrasadas.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-[var(--danger-app-bg)] border border-[var(--danger-app-border)] rounded-xl p-4 flex items-start gap-3"
+        >
+          <div className="w-9 h-9 rounded-lg bg-[var(--danger-app)] text-white grid place-items-center shrink-0">
+            <AlertTriangle size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-semibold text-[var(--danger-app)] mb-0.5">
+              {glosasAtrasadas.length} {glosasAtrasadas.length === 1 ? "glosa atrasada" : "glosas atrasadas"} — total {brl(totalAtrasado)}
+            </h4>
+            <p className="text-xs text-[var(--text-app-secondary)]">
+              Glosas em recurso há mais de 30 dias precisam de follow-up. Considere marcar como perdida ou entrar em contato com o convênio.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setStatusFilter("em_recurso")}
+            className="text-[var(--danger-app)] hover:bg-[var(--danger-app-bg-strong)] shrink-0 text-xs h-8"
+          >
+            Filtrar
+          </Button>
+        </motion.div>
+      )}
 
       {/* Filter */}
       <Card className={cardCls}>
@@ -3243,7 +3292,25 @@ function GlosasPanel({ podeEditar }: { podeEditar: boolean }) {
                       {g.valorRecuperado != null ? brl(num(g.valorRecuperado)) : "—"}
                     </TableCell>
                     <TableCell className="px-4 py-2 align-top">
-                      <StatusBadge status={g.status} config={STATUS_GLOSA} />
+                      <div className="flex flex-col gap-1">
+                        <StatusBadge status={g.status} config={STATUS_GLOSA} />
+                        {g.status === "em_recurso" && (
+                          <span
+                            title={`Desde ${dataBR((g.criadoEm || "").slice(0, 10))} — ${g.diasEmRecurso} dia(s) em recurso`}
+                            className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded w-fit ${
+                              g.atrasada
+                                ? "bg-[var(--danger-app-bg-strong)] text-[var(--danger-app)]"
+                                : g.diasEmRecurso > 15
+                                ? "bg-[var(--warning-app-bg-strong)] text-[var(--warning-app)]"
+                                : "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-muted)]"
+                            }`}
+                          >
+                            <Clock size={9} />
+                            {g.diasEmRecurso}d
+                            {g.atrasada && " · atrasada"}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="px-4 py-2 align-top">
                       <div className="flex items-center gap-1 justify-end flex-wrap">

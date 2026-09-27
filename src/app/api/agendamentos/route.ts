@@ -13,13 +13,15 @@ interface AgendamentoCreateBody {
 }
 
 // GET /api/agendamentos?data=YYYY-MM-DD
-// Lista todos os agendamentos da clinica do usuario autenticado para a data
-// informada. Obrigatorio ?data=AAAA-MM-DD. Inclui os dados do agendamento
-// para o qual este foi remarcado (remarcadoPara.data/hora) achatados em
-// remarcadoParaData/remarcadoParaHora — fiel ao `left join agendamento r` do
-// SQL original. Ordenacao: hora NULL primeiro, depois hora ASC (sort em JS
-// porque o Prisma do SQLite nao suporta `nulls: 'first'` de forma portavel).
-// Aberto a qualquer papel autenticado (agendar nao e acao financeira).
+//   OU ?periodoInicio=YYYY-MM-DD&periodoFim=YYYY-MM-DD
+// Lista todos os agendamentos da clinica do usuario autenticado.
+// Modo data única: usa ?data=AAAA-MM-DD (preserva compat com versão anterior).
+// Modo período: usa ?periodoInicio=&periodoFim= (intervalo inclusivo) — útil
+// pra ver agenda da semana/mês. Em modo período, ordena por data ASC depois
+// hora ASC; em modo data única, mantém a ordenação original (hora NULLs first).
+// Inclui os dados do agendamento para o qual este foi remarcado (remarcadoPara)
+// achatados em remarcadoParaData/remarcadoParaHora.
+// Aberto a qualquer papel autenticado (agendar não é ação financeira).
 export async function GET(req: NextRequest) {
   try {
     const auth = authRequired(req);
@@ -27,23 +29,41 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ erro: auth.erro }, { status: auth.status });
     }
 
-    const data = req.nextUrl.searchParams.get("data");
-    if (!data) {
+    const params = req.nextUrl.searchParams;
+    const data = params.get("data");
+    const periodoInicio = params.get("periodoInicio");
+    const periodoFim = params.get("periodoFim");
+
+    if (!data && !(periodoInicio && periodoFim)) {
       return NextResponse.json(
-        { erro: "Informe ?data=AAAA-MM-DD." },
+        { erro: "Informe ?data=AAAA-MM-DD ou ?periodoInicio=&periodoFim=." },
         { status: 400 }
       );
     }
 
+    const where =
+      data
+        ? { clinicaId: auth.clinicaId, data }
+        : {
+            clinicaId: auth.clinicaId,
+            data: { gte: periodoInicio!, lte: periodoFim! },
+          };
+
     const rows = await db.agendamento.findMany({
-      where: { clinicaId: auth.clinicaId, data },
+      where,
       include: {
         remarcadoPara: { select: { data: true, hora: true } },
       },
     });
 
-    // NULLs primeiro, depois hora ASC (lexicografico para strings "HH:MM").
+    // Ordenação:
+    // - Modo data única: hora NULL primeiro, depois hora ASC.
+    // - Modo período: data ASC, depois hora NULL primeiro, depois hora ASC.
     rows.sort((a, b) => {
+      if (periodoInicio) {
+        const cmpData = a.data.localeCompare(b.data);
+        if (cmpData !== 0) return cmpData;
+      }
       const aNull = !a.hora;
       const bNull = !b.hora;
       if (aNull && bNull) return 0;

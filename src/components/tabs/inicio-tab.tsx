@@ -12,6 +12,7 @@ import { motion } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Sparkline, BarSparkline } from "@/components/app/sparkline";
+import { DonutChart, DonutLegend, type DonutSlice } from "@/components/app/donut-chart";
 
 type AbaId = "inicio" | "custos" | "procedimentos" | "agenda" | "financeiro" | "usuarios";
 
@@ -435,6 +436,27 @@ export function InicioTab({ onNavegar }: InicioTabProps) {
         </section>
       )}
 
+      {/* Distribuição de status de agendamentos (próximos 30 dias) */}
+      <section>
+        <SectionHeader
+          icon={CalendarDays}
+          title="Agendamentos — próximos 30 dias"
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavegar("agenda")}
+              className="text-[var(--accent-app-text)] hover:bg-[var(--accent-app-soft-bg)] text-xs"
+            >
+              Abrir agenda <ArrowRight size={14} className="ml-1" />
+            </Button>
+          }
+        />
+        <div className="bg-[var(--surface-app)] border border-[var(--border-app)] rounded-xl p-4">
+          <StatusAgendamentosCard />
+        </div>
+      </section>
+
       {/* Atalhos rápidos */}
       <section>
         <SectionHeader icon={Activity} title="Atalhos rápidos" />
@@ -699,5 +721,102 @@ function SparklineCard({
         ))}
       </div>
     </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StatusAgendamentosCard — donut chart de distribuição de status dos
+// agendamentos dos próximos 30 dias.
+// ---------------------------------------------------------------------------
+interface ResumoStatus {
+  periodoInicio: string;
+  periodoFim: string;
+  total: number;
+  porStatus: { status: string; total: number }[];
+}
+
+const STATUS_INFO: Record<
+  string,
+  { label: string; color: string }
+> = {
+  aguardando: { label: "Aguardando", color: "var(--text-app-muted)" },
+  atendido: { label: "Atendido", color: "var(--accent-app)" },
+  faltou: { label: "Faltou", color: "var(--danger-app)" },
+  desmarcou: { label: "Desmarcou", color: "var(--text-app-faint)" },
+  remarcado: { label: "Remarcado", color: "var(--warning-app)" },
+};
+
+function StatusAgendamentosCard() {
+  const q = useQuery<ResumoStatus>({
+    queryKey: ["agendamentos", "resumo-status"],
+    queryFn: () => apiFetch(`/api/agendamentos/resumo-status`),
+    retry: 0,
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Skeleton className="h-32 w-32 rounded-full bg-[var(--bg-app-alt-strong)]" />
+      </div>
+    );
+  }
+
+  if (q.isError) {
+    return (
+      <p className="text-sm text-[var(--danger-app)] text-center py-6">
+        {q.error instanceof Error ? q.error.message : "Erro ao carregar"}
+      </p>
+    );
+  }
+
+  const data = q.data;
+  if (!data || data.total === 0) {
+    return (
+      <div className="text-center py-6">
+        <CalendarDays className="mx-auto mb-2 text-[var(--text-app-faint)]" size={28} />
+        <p className="text-sm text-[var(--text-app-muted)]">
+          Nenhum agendamento nos próximos 30 dias.
+        </p>
+      </div>
+    );
+  }
+
+  const slices: DonutSlice[] = data.porStatus
+    .filter((s) => s.total > 0)
+    .map((s) => ({
+      label: STATUS_INFO[s.status]?.label ?? s.status,
+      value: s.total,
+      color: STATUS_INFO[s.status]?.color ?? "var(--text-app-faint)",
+    }));
+
+  // Garante ordem consistente: aguardando > atendido > faltou > desmarcou > remarcado
+  const ordem = ["aguardando", "atendido", "faltou", "desmarcou", "remarcado"];
+  const todasSlices: DonutSlice[] = ordem
+    .map((status) => {
+      const item = data.porStatus.find((x) => x.status === status);
+      if (!item || item.total === 0) return null;
+      return {
+        label: STATUS_INFO[status]?.label ?? status,
+        value: item.total,
+        color: STATUS_INFO[status]?.color ?? "var(--text-app-faint)",
+      };
+    })
+    .filter((x): x is DonutSlice => x !== null);
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-5">
+      <DonutChart
+        slices={todasSlices}
+        tamanho={140}
+        centroValor={String(data.total)}
+        centroLabel="total"
+      />
+      <div className="flex-1 w-full">
+        <DonutLegend slices={todasSlices} total={data.total} />
+        <div className="mt-3 pt-3 border-t border-[var(--border-app-subtle)] text-[11px] text-[var(--text-app-faint)]">
+          Período: {dataBR(data.periodoInicio)} a {dataBR(data.periodoFim)}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -39,6 +39,7 @@ import { InicioTab } from "@/components/tabs/inicio-tab";
 import { UsuariosTab } from "@/components/tabs/usuarios-tab";
 import { CommandPalette } from "./command-palette";
 import { ConfigClinicaDialog } from "./config-clinica-dialog";
+import { dispararNovoItem } from "@/lib/atalhos";
 
 type Papel = "dono" | "financeiro" | "recepcao";
 type AbaId =
@@ -100,10 +101,19 @@ export function AppShell() {
           irParaAba(alvo.id);
         }
       }
+      // 'n' dispara "novo item" na aba ativa (agenda, procedimento, etc.)
+      // A aba decide o que fazer (abrir dialog, focar form, etc.)
+      if (e.key === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Abas que suportam "novo": agenda, procedimentos, financeiro
+        if (["agenda", "procedimentos", "financeiro"].includes(aba)) {
+          e.preventDefault();
+          dispararNovoItem();
+        }
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [usuario, irParaAba]);
+  }, [usuario, irParaAba, aba]);
 
   if (!usuario) return null;
 
@@ -343,10 +353,15 @@ export function AppShell() {
             <span>trocar de aba</span>
           </span>
           <span className="text-[var(--text-app-faint)]">·</span>
+          <span className="flex items-center gap-1">
+            <kbd className="px-1 py-0.5 rounded bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] font-mono">n</kbd>
+            <span>novo item</span>
+          </span>
+          <span className="text-[var(--text-app-faint)]">·</span>
           <span>{abaInfo?.label}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[var(--text-app-faint)]">Gestão Odonto-Radiológica · v2.1</span>
+          <span className="text-[var(--text-app-faint)]">Gestão Odonto-Radiológica · v2.2</span>
         </div>
       </footer>
 

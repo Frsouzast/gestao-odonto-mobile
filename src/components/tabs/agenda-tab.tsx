@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -21,6 +21,7 @@ import { toast } from "sonner";
 
 import { apiFetch } from "@/lib/auth-store";
 import { cn, dataBR } from "@/lib/utils";
+import { onNovoItem } from "@/lib/atalhos";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -126,6 +127,79 @@ function formatarDataLonga(iso: string): string {
   }).format(d);
 }
 
+// Calcula o intervalo (início, fim) e o label de navegação conforme o modo.
+// - dia: início=fim=dataSelecionada; label = data longa (Sexta, 26/09/2025)
+// - semana: segunda a domingo da semana da dataSelecionada; label = "25/09 – 01/10"
+// - mes: primeiro ao último dia do mês; label = "Setembro 2025"
+function calcularPeriodo(
+  modo: "dia" | "semana" | "mes",
+  dataSelecionada: string,
+): {
+  periodoInicio: string | null;
+  periodoFim: string | null;
+  navegacaoLabel: string;
+} {
+  const d = new Date(`${dataSelecionada}T12:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    return { periodoInicio: null, periodoFim: null, navegacaoLabel: dataSelecionada };
+  }
+
+  if (modo === "dia") {
+    return {
+      periodoInicio: dataSelecionada,
+      periodoFim: dataSelecionada,
+      navegacaoLabel: formatarDataLonga(dataSelecionada),
+    };
+  }
+
+  if (modo === "semana") {
+    // Domingo = 0, Segunda = 1, ... Sábado = 6
+    // Considera semana começando na segunda-feira (padrão BR)
+    const diaSemana = d.getDay();
+    const diffSegunda = diaSemana === 0 ? -6 : 1 - diaSemana;
+    const segunda = new Date(d);
+    segunda.setDate(d.getDate() + diffSegunda);
+    const domingo = new Date(segunda);
+    domingo.setDate(segunda.getDate() + 6);
+    const fmt = (x: Date) => x.toISOString().slice(0, 10);
+    const fmtCurto = (x: Date) =>
+      new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(x);
+    return {
+      periodoInicio: fmt(segunda),
+      periodoFim: fmt(domingo),
+      navegacaoLabel: `${fmtCurto(segunda)} – ${fmtCurto(domingo)}`,
+    };
+  }
+
+  // mes
+  const primeiro = new Date(d.getFullYear(), d.getMonth(), 1);
+  const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  const fmt = (x: Date) => x.toISOString().slice(0, 10);
+  const fmtMes = new Intl.DateTimeFormat("pt-BR", {
+    month: "long",
+    year: "numeric",
+  }).format(d);
+  return {
+    periodoInicio: fmt(primeiro),
+    periodoFim: fmt(ultimo),
+    navegacaoLabel: fmtMes.charAt(0).toUpperCase() + fmtMes.slice(1),
+  };
+}
+
+// Helper para invalidar a query correta de agendamentos conforme o modo
+function invalidarAgenda(
+  qc: ReturnType<typeof useQueryClient>,
+  modo: "dia" | "semana" | "mes",
+  dataSelecionada: string,
+) {
+  if (modo === "dia") {
+    qc.invalidateQueries({ queryKey: ["agendamentos", dataSelecionada] });
+  } else {
+    // Invalida todas as queries de período — deixe o TanStack refazer
+    qc.invalidateQueries({ queryKey: ["agendamentos", "periodo"] });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Small UI primitives — match procedimentos-tab
 // ---------------------------------------------------------------------------
@@ -203,6 +277,9 @@ function ListSkeleton() {
 export function AgendaTab() {
   const queryClient = useQueryClient();
   const [dataSelecionada, setDataSelecionada] = useState<string>(hojeIso);
+  const [modoVisualizacao, setModoVisualizacao] = useState<
+    "dia" | "semana" | "mes"
+  >("dia");
 
   // Form state (inline add)
   const [formNome, setFormNome] = useState("");
@@ -211,13 +288,40 @@ export function AgendaTab() {
   const [formPlano, setFormPlano] = useState(false);
   const [formParticular, setFormParticular] = useState(false);
   const [formHora, setFormHora] = useState("");
+  const [formData, setFormData] = useState<string>(hojeIso);
+  const formNomeRef = useRef<HTMLInputElement>(null);
+
+  // Atalho 'n' foca o campo Nome do formulário de novo agendamento
+  useEffect(() => {
+    return onNovoItem(() => {
+      formNomeRef.current?.focus();
+      formNomeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, []);
+
+  // Calcula periodoInicio/periodoFim conforme modo
+  const { periodoInicio, periodoFim, navegacaoLabel } = calcularPeriodo(
+    modoVisualizacao,
+    dataSelecionada,
+  );
+
+  const queryKey =
+    modoVisualizacao === "dia"
+      ? ["agendamentos", dataSelecionada]
+      : ["agendamentos", "periodo", periodoInicio, periodoFim];
 
   const q = useQuery<Agendamento[]>({
-    queryKey: ["agendamentos", dataSelecionada],
-    queryFn: () =>
-      apiFetch<Agendamento[]>(
-        `/api/agendamentos?data=${encodeURIComponent(dataSelecionada)}`,
-      ),
+    queryKey,
+    queryFn: () => {
+      if (modoVisualizacao === "dia") {
+        return apiFetch<Agendamento[]>(
+          `/api/agendamentos?data=${encodeURIComponent(dataSelecionada)}`,
+        );
+      }
+      return apiFetch<Agendamento[]>(
+        `/api/agendamentos?periodoInicio=${encodeURIComponent(periodoInicio!)}&periodoFim=${encodeURIComponent(periodoFim!)}`,
+      );
+    },
     enabled: Boolean(dataSelecionada),
   });
 
@@ -236,9 +340,7 @@ export function AgendaTab() {
         body: JSON.stringify(novo),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["agendamentos", dataSelecionada],
-      });
+      invalidarAgenda(queryClient, modoVisualizacao, dataSelecionada);
       setFormNome("");
       setFormTelefone("");
       setFormExame("");
@@ -257,9 +359,7 @@ export function AgendaTab() {
         body: JSON.stringify({ status }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["agendamentos", dataSelecionada],
-      });
+      invalidarAgenda(queryClient, modoVisualizacao, dataSelecionada);
       toast.success("Status atualizado.");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -283,9 +383,7 @@ export function AgendaTab() {
         }),
       }),
     onSuccess: (_novo, vars) => {
-      queryClient.invalidateQueries({
-        queryKey: ["agendamentos", dataSelecionada],
-      });
+      invalidarAgenda(queryClient, modoVisualizacao, dataSelecionada);
       // Also invalidate the destination date so the new agendamento appears
       // there if/when the user navigates to it.
       if (vars.novaData && vars.novaData !== dataSelecionada) {
@@ -302,9 +400,7 @@ export function AgendaTab() {
     mutationFn: (id: string) =>
       apiFetch<void>(`/api/agendamentos/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["agendamentos", dataSelecionada],
-      });
+      invalidarAgenda(queryClient, modoVisualizacao, dataSelecionada);
       toast.success("Agendamento excluído.");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -317,13 +413,19 @@ export function AgendaTab() {
       toast.error("Informe o nome do paciente.");
       return;
     }
+    // Em modo dia, usa dataSelecionada; em semana/mês, usa formData (input date extra)
+    const dataFinal = modoVisualizacao === "dia" ? dataSelecionada : formData;
+    if (!dataFinal) {
+      toast.error("Informe a data do agendamento.");
+      return;
+    }
     addMut.mutate({
       nome,
       telefone: formTelefone.trim() || undefined,
       exame: formExame.trim() || undefined,
       plano: formPlano,
       particular: formParticular,
-      data: dataSelecionada,
+      data: dataFinal,
       hora: formHora || undefined,
     });
   }
@@ -334,20 +436,44 @@ export function AgendaTab() {
     <div className="h-full overflow-y-auto scroll-thin p-4 sm:p-6 bg-[var(--bg-app)]">
       <div className="max-w-4xl mx-auto space-y-4">
         {/* ---------------------------------------------------------------- */}
-        {/* Day navigation                                                   */}
+        {/* Day/Week/Month navigation                                        */}
         {/* ---------------------------------------------------------------- */}
         <Card className="bg-[var(--surface-app)] border-[var(--border-app)] rounded-xl shadow-none p-3 sm:p-4">
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Toggle Dia/Semana/Mês */}
+            <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-[var(--bg-app-alt-strong)]">
+              {([
+                { id: "dia", label: "Dia" },
+                { id: "semana", label: "Semana" },
+                { id: "mes", label: "Mês" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setModoVisualizacao(opt.id)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                    modoVisualizacao === opt.id
+                      ? "bg-[var(--surface-app)] text-[var(--accent-app-text)] shadow-sm"
+                      : "text-[var(--text-app-muted)] hover:text-[var(--text-app)]"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
             <div className="flex items-center gap-1.5">
               <Button
                 type="button"
                 size="icon"
                 variant="outline"
                 onClick={() =>
-                  setDataSelecionada((d) => diaOffset(d, -1))
+                  setDataSelecionada((d) =>
+                    diaOffset(d, modoVisualizacao === "dia" ? -1 : modoVisualizacao === "semana" ? -7 : -30),
+                  )
                 }
-                title="Dia anterior"
-                aria-label="Dia anterior"
+                title={modoVisualizacao === "dia" ? "Anterior" : modoVisualizacao === "semana" ? "Semana anterior" : "Mês anterior"}
+                aria-label="Anterior"
                 className="h-9 w-9 bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)]"
               >
                 <ChevronLeft size={16} />
@@ -365,10 +491,12 @@ export function AgendaTab() {
                 size="icon"
                 variant="outline"
                 onClick={() =>
-                  setDataSelecionada((d) => diaOffset(d, 1))
+                  setDataSelecionada((d) =>
+                    diaOffset(d, modoVisualizacao === "dia" ? 1 : modoVisualizacao === "semana" ? 7 : 30),
+                  )
                 }
-                title="Próximo dia"
-                aria-label="Próximo dia"
+                title={modoVisualizacao === "dia" ? "Próximo" : modoVisualizacao === "semana" ? "Próxima semana" : "Próximo mês"}
+                aria-label="Próximo"
                 className="h-9 w-9 bg-[var(--surface-app)] border-[var(--border-app)] text-[var(--text-app)] hover:bg-[var(--bg-app-alt-strong)]"
               >
                 <ChevronRight size={16} />
@@ -382,13 +510,23 @@ export function AgendaTab() {
                   className="text-[var(--text-app-muted)] shrink-0"
                 />
                 <span className="text-sm font-semibold text-[var(--accent-app-text)] capitalize truncate">
-                  {formatarDataLonga(dataSelecionada)}
+                  {navegacaoLabel}
                 </span>
-                {dataSelecionada === hojeIso() && (
-                  <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-muted)] bg-[var(--bg-app-alt-strong)] px-1.5 py-0.5 rounded">
-                    hoje
-                  </span>
-                )}
+                {(() => {
+                  const hoje = hojeIso();
+                  const dentroDoPeriodo =
+                    modoVisualizacao === "dia"
+                      ? dataSelecionada === hoje
+                      : periodoInicio && periodoFim && periodoInicio <= hoje && periodoFim >= hoje;
+                  if (dentroDoPeriodo) {
+                    return (
+                      <span className="text-[10px] uppercase tracking-wide text-[var(--text-app-muted)] bg-[var(--bg-app-alt-strong)] px-1.5 py-0.5 rounded">
+                        atual
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
 
@@ -423,8 +561,13 @@ export function AgendaTab() {
                 Novo agendamento
               </h3>
               <span className="text-[11px] text-[var(--text-app-muted)]">
-                para {dataBR(dataSelecionada)}
+                {modoVisualizacao === "dia"
+                  ? `para ${dataBR(dataSelecionada)}`
+                  : "escolha a data abaixo"}
               </span>
+              <kbd className="hidden sm:inline-block ml-auto px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-app-faint)] bg-[var(--bg-app-alt-strong)] border border-[var(--border-app)] rounded">
+                n
+              </kbd>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3">
@@ -433,6 +576,7 @@ export function AgendaTab() {
                   Nome *
                 </Label>
                 <Input
+                  ref={formNomeRef}
                   value={formNome}
                   onChange={(e) => setFormNome(e.target.value)}
                   placeholder="Nome do paciente"
@@ -476,7 +620,22 @@ export function AgendaTab() {
                 />
               </div>
 
-              <div className="flex items-center gap-5 lg:col-span-6 sm:col-span-2 h-9">
+              {/* Campo de data extra — só aparece nos modos semana/mês */}
+              {modoVisualizacao !== "dia" && (
+                <div className="lg:col-span-2 sm:col-span-2">
+                  <Label className="text-[11px] text-[var(--text-app-muted)] mb-1 block">
+                    Data *
+                  </Label>
+                  <Input
+                    type="date"
+                    value={formData}
+                    onChange={(e) => setFormData(e.target.value)}
+                    className={cn(inputCls, "h-9")}
+                  />
+                </div>
+              )}
+
+              <div className={`flex items-center gap-5 h-9 ${modoVisualizacao !== "dia" ? "lg:col-span-4 sm:col-span-2" : "lg:col-span-6 sm:col-span-2"}`}>
                 <label className="flex items-center gap-2 text-sm text-[var(--text-app)] cursor-pointer select-none">
                   <Checkbox
                     checked={formPlano}
@@ -560,10 +719,16 @@ export function AgendaTab() {
           ) : agendamentos.length === 0 ? (
             <EmptyState
               icon={<CalendarDays size={22} strokeWidth={1.5} />}
-              title="Nenhum agendamento para este dia."
+              title={
+                modoVisualizacao === "dia"
+                  ? "Nenhum agendamento para este dia."
+                  : modoVisualizacao === "semana"
+                  ? "Nenhum agendamento nesta semana."
+                  : "Nenhum agendamento neste mês."
+              }
               hint="Adicione o primeiro acima."
             />
-          ) : (
+          ) : modoVisualizacao === "dia" ? (
             <div className="max-h-[60vh] overflow-y-auto scroll-thin divide-y divide-[var(--border-app-subtle)]">
               {agendamentos.map((ag) => (
                 <AppointmentRow
@@ -587,6 +752,19 @@ export function AgendaTab() {
                 />
               ))}
             </div>
+          ) : (
+            <AgrupadoPorData
+              agendamentos={agendamentos}
+              onStatusChange={(id, status) => updateStatusMut.mutate({ id, status })}
+              onRemarcar={(id, novaData, novaHora) =>
+                remarcarMut.mutate({ id, novaData, novaHora })
+              }
+              onDelete={(id) => deleteMut.mutate(id)}
+              onJumpToDate={(d) => setDataSelecionada(d)}
+              isRemarcando={remarcarMut.isPending}
+              isStatusPending={updateStatusMut.isPending}
+              isDeleting={deleteMut.isPending}
+            />
           )}
         </Card>
       </div>
@@ -869,6 +1047,93 @@ function AppointmentRow({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AgrupadoPorData — agrupa agendamentos por data (modo semana/mês)
+// Renderiza um header de data com contagem, seguido pelos agendamentos do dia.
+// ---------------------------------------------------------------------------
+function AgrupadoPorData({
+  agendamentos,
+  onStatusChange,
+  onRemarcar,
+  onDelete,
+  onJumpToDate,
+  isRemarcando,
+  isStatusPending,
+  isDeleting,
+}: {
+  agendamentos: Agendamento[];
+  onStatusChange: (id: string, status: StatusAgendamento) => void;
+  onRemarcar: (id: string, novaData: string, novaHora?: string) => void;
+  onDelete: (id: string) => void;
+  onJumpToDate: (data: string) => void;
+  isRemarcando: boolean;
+  isStatusPending: boolean;
+  isDeleting: boolean;
+}) {
+  // Agrupa por data (preserva ordem ASC dos agendamentos)
+  const grupos = new Map<string, Agendamento[]>();
+  for (const ag of agendamentos) {
+    const arr = grupos.get(ag.data) || [];
+    arr.push(ag);
+    grupos.set(ag.data, arr);
+  }
+
+  const datas = Array.from(grupos.keys()).sort((a, b) => a.localeCompare(b));
+  const hoje = hojeIso();
+
+  return (
+    <div className="max-h-[60vh] overflow-y-auto scroll-thin space-y-3">
+      {datas.map((data) => {
+        const lista = grupos.get(data) || [];
+        const d = new Date(`${data}T12:00:00`);
+        const ehHoje = data === hoje;
+        const diaSemana = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(d);
+        const diaMes = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(d);
+        return (
+          <div key={data}>
+            {/* Header do dia */}
+            <div
+              className={`sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md ${
+                ehHoje
+                  ? "bg-[var(--accent-app-soft-bg-strong)] text-[var(--accent-app-text)]"
+                  : "bg-[var(--bg-app-alt-strong)] text-[var(--text-app-secondary)]"
+              }`}
+            >
+              <CalendarDays size={13} />
+              <span className="capitalize">{diaSemana}</span>
+              <span>· {diaMes}</span>
+              {ehHoje && (
+                <span className="text-[10px] uppercase tracking-wide bg-[var(--accent-app)] text-white px-1.5 py-0.5 rounded">
+                  hoje
+                </span>
+              )}
+              <span className="ml-auto text-[10px] font-normal text-[var(--text-app-muted)]">
+                {lista.length} {lista.length === 1 ? "agendamento" : "agendamentos"}
+              </span>
+            </div>
+            {/* Lista do dia */}
+            <div className="divide-y divide-[var(--border-app-subtle)] mt-1">
+              {lista.map((ag) => (
+                <AppointmentRow
+                  key={ag.id}
+                  ag={ag}
+                  onStatusChange={(status) => onStatusChange(ag.id, status)}
+                  onRemarcar={(novaData, novaHora) => onRemarcar(ag.id, novaData, novaHora)}
+                  onDelete={() => onDelete(ag.id)}
+                  onJumpToDate={onJumpToDate}
+                  isRemarcando={isRemarcando}
+                  isStatusPending={isStatusPending}
+                  isDeleting={isDeleting}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

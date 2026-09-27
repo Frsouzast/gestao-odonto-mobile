@@ -27,13 +27,23 @@ export async function GET(req: NextRequest) {
       orderBy: { criadoEm: "desc" },
     });
 
-    const result = rows.map(({ contaReceber, ...g }) => ({
-      ...g,
-      pacienteNome: contaReceber?.pacienteNome ?? null,
-      valorFaturado: contaReceber?.valorFaturado ?? null,
-      dataExame: contaReceber?.dataExame ?? null,
-      convenioNome: contaReceber?.convenio?.nome ?? null,
-    }));
+    const result = rows.map(({ contaReceber, ...g }) => {
+      // Calcula dias em recurso (desde a criação da glosa) — só relevante
+      // quando status === 'em_recurso'. Considera 30 dias como prazo recomendado
+      // para follow-up; > 30 = atrasada (alerta visual no frontend).
+      const criadoEmMs = g.criadoEm ? new Date(g.criadoEm).getTime() : Date.now();
+      const diasEmRecurso = Math.floor((Date.now() - criadoEmMs) / (1000 * 60 * 60 * 24));
+      const atrasada = g.status === "em_recurso" && diasEmRecurso > 30;
+      return {
+        ...g,
+        pacienteNome: contaReceber?.pacienteNome ?? null,
+        valorFaturado: contaReceber?.valorFaturado ?? null,
+        dataExame: contaReceber?.dataExame ?? null,
+        convenioNome: contaReceber?.convenio?.nome ?? null,
+        diasEmRecurso,
+        atrasada,
+      };
+    });
 
     return NextResponse.json(result);
   } catch (err) {

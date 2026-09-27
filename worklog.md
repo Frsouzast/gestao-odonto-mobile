@@ -914,3 +914,147 @@ Task: 3 novas features prioritárias (busca global, config clínica, sparklines)
 6. **Atalhos de teclado adicionais**: `/` foca busca dentro da aba atual, `n` cria novo item na aba ativa
 7. **Tooltips em badges** explicando significado de cada status/percentual
 8. **Testes** automatizados com Playwright
+
+---
+Task ID: T7 (cron rodada 3 — webDevReview)
+Agent: main (Claude/Z.ai)
+Task: 4 novas features (filtro agenda por período, pie chart de status, workflow de glosas com prazos, atalho 'n') + melhorias de styling
+
+## Avaliação do status atual (início da rodada)
+- T6 (rodada anterior) deixou projeto em v2.1 estável com 9 features
+- QA inicial via agent-browser: login OK, Início/Financeiro/Agenda renderizando sem bugs
+- Prioridades sugeridas: paginação, workflow glosas, filtro agenda por período, pie chart, atalhos extras
+- Esta rodada implementei as 4 mais impactantes (pulei paginação por envolver refactor grande das tabelas)
+
+## Work Log
+
+### Backend: 2 endpoints modificados + 1 novo
+- **`/api/agendamentos` (GET)** modificado para aceitar `?periodoInicio=&periodoFim=` além de `?data=` (preserva compat)
+  - Modo período: `where: { data: { gte, lte } }`, ordenação por data ASC + hora ASC
+  - Modo data única: mantém ordenação original (hora NULLs first)
+- **`/api/glosas` (GET)** estendido com 2 campos extras calculados em runtime:
+  - `diasEmRecurso`: floor((now - criadoEm) / dia) — só relevante quando status='em_recurso'
+  - `atrasada`: `status === 'em_recurso' && diasEmRecurso > 30` (prazo recomendado para follow-up)
+- **`/api/agendamentos/resumo-status` (GET)** novo endpoint:
+  - Params opcionais `?periodoInicio=&periodoFim=` (default: próximos 30 dias a partir de hoje)
+  - Retorna `{ periodoInicio, periodoFim, total, porStatus: [{status, total}] }` — garante que todos os 5 status apareçam (mesmo com zero)
+
+### FUNCIONALIDADE 1: Filtro de agendamentos por Dia/Semana/Mês
+- Adicionado state `modoVisualizacao: "dia" | "semana" | "mes"` no `agenda-tab.tsx`
+- **Toggle visual** (3 botões estilo segmented control): Dia / Semana / Mês com background `bg-app-alt-strong` e item ativo destacado
+- **Navegação contextual**: setas `<` `>` aplicam offset -1/+1 (dia), -7/+7 (semana), -30/+30 (mês)
+- **Label dinâmico** conforme modo:
+  - dia: "Sexta-feira, 26/09/2025" (formatarDataLonga)
+  - semana: "25/09 – 01/10" (segunda a domingo, padrão BR)
+  - mês: "Setembro 2025" (capitalizado)
+- **Badge "atual"** quando a data/período selecionado inclui hoje
+- **Form de novo agendamento adaptável**:
+  - Modo dia: usa `dataSelecionada` direto (igual antes), mostra "para dd/mm/yyyy"
+  - Modo semana/mês: mostra campo "Data *" extra pro usuário escolher o dia específico
+- **Agrupamento por data** quando modo != dia:
+  - Criado componente `AgrupadoPorData` que renderiza header sticky por dia
+  - Header mostra: dia da semana + dd/mm + badge "hoje" (se aplicável) + contador
+  - Abaixo do header: lista de AppointmentRow daquele dia
+  - Cores: header "hoje" em accent-soft-bg-strong, outros em bg-app-alt-strong
+- Helper `invalidarAgenda(qc, modo, data)` decide qual queryKey invalidar
+- Helper `calcularPeriodo(modo, data)` retorna `{periodoInicio, periodoFim, navegacaoLabel}`
+- QA: testei ciclo Dia → criar "João Teste" → Semana → viu agrupamento "Domingo · 27/09 · HOJE · 1 agendamento" ✓
+
+### FUNCIONALIDADE 2: Pie chart (donut) de distribuição de status no Início
+- Criado `src/components/app/donut-chart.tsx` (~150 linhas) — SVG puro sem recharts
+  - `DonutChart`: donut com track de fundo + fatias coloridas via strokeDasharray
+  - Tooltip nativo via `<title>` em cada fatia (acessível)
+  - Centro personalizável com label + valor (total)
+  - Props: `slices, tamanho, strokeWidth, centroLabel, centroValor`
+- `DonutLegend`: lista lateral com cor, label, contagem e %
+- Adicionado `StatusAgendamentosCard` em `inicio-tab.tsx`:
+  - Nova seção "Agendamentos — próximos 30 dias" entre "Tendência" e "Atalhos"
+  - Donut 140px + legenda lateral + rodapé com período
+  - Cores mapeadas: aguardando (text-muted), atendido (accent), faltou (danger), desmarcou (text-faint), remarcado (warning)
+  - Empty state "Nenhum agendamento nos próximos 30 dias"
+- QA: abri Início → seção carregou com 0 agendamentos → empty state correto ✓
+
+### FUNCIONALIDADE 3: Workflow de glosas com prazos e alertas
+- Interface `Glosa` estendida com `diasEmRecurso: number` e `atrasada: boolean`
+- **4 StatCards** no painel de Glosas (era 3, adicionei um):
+  - "Total glosado (todas pendências)" — danger
+  - "Quantidade de glosas"
+  - **"Atrasadas (>30 dias em recurso)"** — danger quando > 0
+  - "Filtro atual"
+- **Banner de alerta** aparece quando há glosas atrasadas:
+  - Background `danger-app-bg` + borda `danger-app-border`
+  - Ícone AlertTriangle em quadrado danger
+  - Texto: "X glosas atrasadas — total R$ Y" + explicação
+  - Botão "Filtrar" que aplica `statusFilter="em_recurso"`
+  - Animação framer-motion (fade + scale in)
+- **Badge inline "X dias"** ao lado do status quando glosa está em_recurso:
+  - `> 30 dias` → danger bg + "atrasada" suffix
+  - `> 15 dias` → warning bg
+  - `≤ 15 dias` → muted bg
+  - Tooltip nativo via `title=` mostrando "Desde dd/mm/yyyy — X dia(s) em recurso"
+  - Ícone Clock (9px) + número de dias
+
+### FUNCIONALIDADE 4: Atalho 'n' para criar novo item na aba ativa
+- Criado `src/lib/atalhos.ts` com event bus simples:
+  - `dispararNovoItem()` — emite evento `app:novo-item` no window
+  - `onNovoItem(handler)` — registra listener, retorna cleanup
+- `app-shell.tsx` intercepta tecla 'n' (sem ctrl/meta/alt, fora de inputs) e dispara evento quando aba atual é agenda/procedimentos/financeiro
+- **Agenda**: handler foca o input "Nome do paciente" + scrollIntoView
+  - Adicionada `ref={formNomeRef}` no Input
+  - Adicionado `useEffect` que registra handler via `onNovoItem`
+  - Kbd hint "n" no header do form de novo agendamento
+- Footer do app-shell atualizado pra mostrar 3 atalhos: Ctrl+K buscar, Ctrl+1-6 abas, **n novo item**
+- Versão bumped pra v2.2
+- QA: em modo semana, pressionei 'n' → input Nome focou ✓ (verificado via `document.activeElement.placeholder === "Nome do paciente"`)
+
+### STYLING (mandatório)
+- **Toggle Dia/Semana/Mês**: segmented control com `bg-app-alt-strong` no container e `bg-surface-app` no item ativo + shadow-sm
+- **Header sticky por dia** (modo semana/mês): `sticky top-0 z-10` com cor de fundo diferenciando "hoje" dos outros dias
+- **Badge "hoje"** no header do agrupamento: `bg-accent-app text-white` uppercase tracking-wide
+- **Banner de alerta de glosas**: layout flex com ícone em quadrado, conteúdo flex-1, botão shrink-0 — responsivo
+- **Badge "X dias"** inline em glosas: padding menor (px-1.5 py-0.5), fonte 10px, ícone Clock 9px
+- **Donut chart**: track de fundo + fatias com `transform: rotate(-90)` pra começar no topo + centro com label/valor sobreposto
+- **Kbd hints** (`n`, `⌘K`, `1-6`) estilizados consistentemente: `bg-app-alt-strong border border-app font-mono text-[10px]`
+
+## Stage Summary
+
+### Status atual do projeto
+- App em v2.2 com **13 features totais** (acumuladas de T5+T6+T7):
+  - 6 abas (Início, Custos, Procedimentos, Agenda, Financeiro, Usuários)
+  - Atalhos Ctrl+1..6 (trocar aba) + Ctrl+K (busca global) + **n** (novo item na aba ativa)
+  - Busca global command palette
+  - Configurações da clínica (nome + CNPJ com máscara)
+  - Sparklines de tendência 6 meses (receitas, despesas, resultado)
+  - **Donut chart de distribuição de status dos agendamentos (próximos 30 dias)**
+  - **Agenda com toggle Dia/Semana/Mês + agrupamento por data**
+  - **Workflow de glosas com prazos + banner de alerta + badges de dias em recurso**
+  - Exportação CSV + Imprimir (PDF) em 3 painéis do Financeiro
+- Lint: PASS (0 erros)
+- Dev server: sem erros de runtime
+- QA agent-browser: todos os fluxos end-to-end validados
+
+### Modificações concluídas
+- **2 endpoints modificados** (`/api/agendamentos` aceita período, `/api/glosas` retorna diasEmRecurso + atrasada)
+- **1 novo endpoint** (`/api/agendamentos/resumo-status`)
+- **3 novos componentes** (`donut-chart.tsx`, `atalhos.ts`, `AgrupadoPorData` dentro de agenda-tab)
+- **3 arquivos modificados** (`agenda-tab.tsx` com toggle+agrupamento, `inicio-tab.tsx` com seção donut, `financeiro-tab.tsx` com banner+badges, `app-shell.tsx` com atalho 'n'+footer atualizado)
+- 6 screenshots em `/home/z/my-project/download/`:
+  - `inicio-v2.2.png`, `inicio-distribuicao.png`
+  - `agenda-modo-semana.png`, `agenda-agrupada-semana.png`
+  - `glosas-v2.2.png`
+
+### Issues/risks não resolvidos
+- `invalidarAgenda` em modo semana não invalida queries de período adjacentes quando cria agendamento — ao trocar de modo, refaz a query (UX aceitável)
+- Paginação nas tabelas longas (Contas a Receber/Pagar com >20 itens) — ainda não implementada
+- Sem testes automatizados (Playwright/Vitest)
+- `/api/busca` ainda traz tudo da clínica (suficiente p/ SQLite single-tenant)
+
+### Prioridades recomendadas para próxima rodada (cron 15 min)
+1. **Paginação nas tabelas longas** (Contas a Receber/Pagar) — `useInfiniteQuery` + botão "Carregar mais"
+2. **Atalho 'n' nas outras abas** (Procedimentos: abrir dialog de novo procedimento, Financeiro: abrir dialog de novo lançamento de conta a receber)
+3. **Modo de impressão dedicado** pra agenda do dia (PDF com layout otimizado pra balcão de recepção)
+4. **Workflow de glosas com prazos configuráveis** (permitir definir prazo por convênio, não fixo em 30 dias)
+5. **Indicadores visuais extras**: mini-gráfico de evolução de agendamentos por semana no Início
+6. **Tooltips explicativos** em todos os badges de status (já implementado em glosas, estender para contas)
+7. **Filtro de procedimentos por faixa de preço** no Início (quantos estão abaixo do ponto de equilíbrio)
+8. **Testes** automatizados com Playwright
